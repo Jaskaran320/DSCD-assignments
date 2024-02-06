@@ -33,16 +33,20 @@ class MarketServicer(market_pb2_grpc.MarketServiceServicer):
         item_details = request.item_details
         print(f"Sell Item request from {seller_info.address}")
 
+        if seller_info.uuid not in self.sellers:
+            response = market_pb2.SellItemResponse()
+            response.status = market_pb2.SellItemResponse.Status.INVALID_SELLER
+            return response
+        
         item_id = str(uuid.uuid4())
-
         self.items[item_id] = {
             "product_name": item_details.product_name,
-            "category": item_details.WhichOneof("Category"),
+            "category": item_details.category,
             "quantity": item_details.quantity,
             "description": item_details.description,
             "seller_address": item_details.seller_address,
             "price_per_unit": item_details.price_per_unit,
-            "rating": [],
+            "rating": 0.0,
         }
 
         response = market_pb2.SellItemResponse()
@@ -59,7 +63,7 @@ class MarketServicer(market_pb2_grpc.MarketServiceServicer):
         print(f"Update Item {item_id} request from {seller_info.address}")
 
         if (seller_info.uuid not in self.sellers
-            or self.sellers[seller_info.uuid]["address"] != seller_info.address):
+            or self.sellers[seller_info.uuid] != seller_info.address):
             response = market_pb2.UpdateItemResponse()
             response.status = market_pb2.UpdateItemResponse.Status.INVALID_SELLER
             return response
@@ -88,7 +92,7 @@ class MarketServicer(market_pb2_grpc.MarketServiceServicer):
         print(f"Delete Item {item_id} request from {seller_info.address}")
 
         if (seller_info.uuid not in self.sellers 
-        or self.sellers[seller_info.uuid]["address"] != seller_info.address):
+        or self.sellers[seller_info.uuid] != seller_info.address):
             response = market_pb2.DeleteItemResponse()
             response.status = market_pb2.DeleteItemResponse.Status.INVALID_SELLER
             return response
@@ -113,11 +117,11 @@ class MarketServicer(market_pb2_grpc.MarketServiceServicer):
             if item_details["seller_address"] == seller_info.address:
                 item = market_pb2.DisplaySellerItemsResponse.Item(
                     item_id=item_id,
-                    price=item_details["price_per_unit"],
+                    price_per_unit=item_details["price_per_unit"],
                     product_name=item_details["product_name"],
-                    category=market_pb2.Category.Value(item_details["category"]), # TODO: check this
+                    category=item_details["category"],
                     description=item_details["description"],
-                    quantity_remaining=item_details["quantity"],
+                    quantity=item_details["quantity"],
                     seller_address=item_details["seller_address"],
                     rating=item_details["rating"]
                 )
@@ -136,16 +140,16 @@ class MarketServicer(market_pb2_grpc.MarketServiceServicer):
 
     def SearchItem(self, request, context):
         item_name = request.item_name
-        category = request.category
+        category = get_category_string(request.category)
         print(f"Search request for Item name: {item_name if item_name else '[ALL_ITEMS]'}, Category: {category}")
 
         matched_items = []
-        for _, item_details in self.items.items():
+        for item_id, item_details in self.items.items():
             if (not item_name or item_details["product_name"].lower() == item_name.lower()) and \
-               (category == market_pb2.category.any or item_details["category"] == category.name):
-                matched_item = market_pb2.ItemDetails(
+               (category == "any" or  category == item_details["category"]):
+                matched_item = market_pb2.SearchItemResponse.Item(
+                    item_id=item_id,
                     product_name=item_details["product_name"],
-                    # category=market_pb2.category.Value(item_details["category"]),
                     category=item_details["category"],
                     quantity=item_details["quantity"],
                     description=item_details["description"],
@@ -166,13 +170,18 @@ class MarketServicer(market_pb2_grpc.MarketServiceServicer):
         buyer_address = request.buyer_address
         print(f"Buy request {quantity} of item {item_id}, from {buyer_address}")
 
-        if item_id in self.items and self.items[item_id]["quantity"] >= quantity:
+        if item_id in self.items:
+            if self.items[item_id]["quantity"] < quantity:
+                response = market_pb2.BuyItemResponse()
+                response.status = market_pb2.BuyItemResponse.Status.QUANTITY_EXCEEDS_STOCK
+                return response
+            
             self.items[item_id]["quantity"] -= quantity
             response = market_pb2.BuyItemResponse()
             response.status = market_pb2.BuyItemResponse.Status.SUCCESS
         else:
             response = market_pb2.BuyItemResponse()
-            response.status = market_pb2.BuyItemResponse.Status.FAILED
+            response.status = market_pb2.BuyItemResponse.Status.ITEM_NOT_FOUND
 
         return response
 
@@ -182,6 +191,10 @@ class MarketServicer(market_pb2_grpc.MarketServiceServicer):
         print(f"Wishlist request of item {item_id}, from {buyer_address}")
 
         if buyer_address in self.wishlist:
+            if item_id in self.wishlist[buyer_address]:
+                response = market_pb2.AddToWishListResponse()
+                response.status = market_pb2.AddToWishListResponse.Status.ITEM_ALREADY_IN_WISHLIST
+                return response
             self.wishlist[buyer_address].append(item_id)
         else:
             self.wishlist[buyer_address] = [item_id]
@@ -194,15 +207,16 @@ class MarketServicer(market_pb2_grpc.MarketServiceServicer):
         item_id = request.item_id
         buyer_address = request.buyer_address
         rating = request.rating
-        print(f"{buyer_address} rated item {item_id} with {rating} stars")
 
         if item_id not in self.items:
             response = market_pb2.RateItemResponse()
             response.status = market_pb2.RateItemResponse.Status.ITEM_NOT_FOUND
+            return response
 
         if item_id in self.ratings and buyer_address in self.ratings[item_id]:
             response = market_pb2.RateItemResponse()
-            response.status = market_pb2.RateItemResponse.Status.ALREADY_RATED
+            response.status = market_pb2.RateItemResponse.Status.ITEM_ALREADY_RATED
+            return response
 
         current_rating = self.items[item_id]["rating"]
         num_ratings = len(self.ratings.get(item_id, []))
@@ -216,6 +230,7 @@ class MarketServicer(market_pb2_grpc.MarketServiceServicer):
 
         response = market_pb2.RateItemResponse()
         response.status = market_pb2.RateItemResponse.Status.SUCCESS
+        print(f"Buyer {buyer_address} rated item {item_id} with {rating} stars")
 
         return response
     
@@ -242,6 +257,15 @@ class MarketServicer(market_pb2_grpc.MarketServiceServicer):
                     print(f"Notification sent to buyer {buyer_address}")
                 else:
                     print(f"Notification failed for buyer {buyer_address}")
+
+def get_category_string(category_num):
+    category_map = {
+        0: "electronics",
+        1: "fashion",
+        2: "others",
+        3: "any"
+    }
+    return category_map[category_num]
 
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))

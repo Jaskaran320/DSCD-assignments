@@ -18,17 +18,18 @@ message RegisterSellerResponse {
 }
 
 message ItemDetails {
-  string product_name = 1;
-  oneof category {
-    string electronics = 2;
-    string fashion = 3;
-    string others = 4;
+  enum Category {
+    electronics = 0;
+    fashion = 1;
+    others = 2;
   }
-  int32 quantity = 5;
-  string description = 6;
-  string seller_address = 7;
-  float price_per_unit = 8;
-  float rating = 9;
+  string product_name = 1;
+  Category category = 2;
+  int32 quantity = 3;
+  string description = 4;
+  string seller_address = 5;
+  float price_per_unit = 6;
+  float rating = 7;
 }
 
 message SellItemRequest {
@@ -39,7 +40,8 @@ message SellItemRequest {
 message SellItemResponse {
   enum Status {
     SUCCESS = 0;
-    FAILED = 1;
+    INVALID_SELLER = 1;
+    INVALID_CATEGORY = 2;
   }
   Status status = 1;
   string item_id = 2;
@@ -81,18 +83,19 @@ message DisplaySellerItemsRequest {
 
 message DisplaySellerItemsResponse {
   message Item {
-    string item_id = 1;
-    oneof category {
-      string electronics = 2;
-      string fashion = 3;
-      string others = 4;
+    enum Category {
+      electronics = 0;
+      fashion = 1;
+      others = 2;
     }
-    string product_name = 5;
-    float price = 6;
-    string description = 7;
-    int32 quantity_remaining = 8;
-    string seller_address = 9;
-    float rating = 10;
+    string item_id = 1;
+    string product_name = 2;
+    Category category = 3;
+    float price_per_unit = 4;
+    string description = 5;
+    int32 quantity = 6;
+    string seller_address = 7;
+    float rating = 8;
   }
   enum Status {
     SUCCESS = 0;
@@ -103,17 +106,33 @@ message DisplaySellerItemsResponse {
 }
 
 message SearchItemRequest {
-  string item_name = 1;
-  oneof category {
-    string electronics = 2;
-    string fashion = 3;
-    string others = 4;
-    string any = 5;
+  enum Category {
+    electronics = 0;
+    fashion = 1;
+    others = 2;
+    any = 3;
   }
+  string item_name = 1;
+  Category category = 2;
 }
 
 message SearchItemResponse {
-  repeated ItemDetails items = 1;
+  message Item {
+    enum Category {
+      electronics = 0;
+      fashion = 1;
+      others = 2;
+    }
+    string item_id = 1;
+    string product_name = 2;
+    Category category = 3;
+    float price_per_unit = 4;
+    string description = 5;
+    int32 quantity = 6;
+    string seller_address = 7;
+    float rating = 8;
+  }
+  repeated Item items = 1;
 }
 
 message BuyItemRequest {
@@ -125,7 +144,8 @@ message BuyItemRequest {
 message BuyItemResponse {
   enum Status {
     SUCCESS = 0;
-    FAILED = 1;
+    QUANTITY_EXCEEDS_STOCK = 1;
+    ITEM_NOT_FOUND = 2;
   }
   Status status = 1;
 }
@@ -138,7 +158,8 @@ message AddToWishListRequest {
 message AddToWishListResponse {
   enum Status {
     SUCCESS = 0;
-    FAILED = 1;
+    ITEM_ALREADY_IN_WISHLIST = 1;
+    FAILED = 2;
   }
   Status status = 1;
 }
@@ -153,7 +174,7 @@ message RateItemResponse {
   enum Status {
     SUCCESS = 0;
     ITEM_NOT_FOUND = 1;
-    ALREADY_RATED = 2;
+    ITEM_ALREADY_RATED = 2;
   }
   Status status = 1;
 }
