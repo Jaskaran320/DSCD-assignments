@@ -42,12 +42,12 @@ def receive_notifications(ch, method, properties, body):
 if len(sys.argv) == 4:
     if action == "s":
         update_subscription(user_name, youtuber, "true")
-        time.sleep(0.5)
+        time.sleep(0.1)
         channel.basic_consume(queue=user_name, on_message_callback=receive_notifications, auto_ack=True)
         channel.start_consuming()
     elif action == "u":
         update_subscription(user_name, youtuber, "false")
-        time.sleep(0.5)
+        time.sleep(0.1)
         channel.basic_consume(queue=user_name, on_message_callback=receive_notifications, auto_ack=True)
         channel.start_consuming()
     else:
@@ -56,6 +56,7 @@ if len(sys.argv) == 4:
 elif len(sys.argv) == 2:
     login(user_name)
     # add a delay to ensure that the user queue is created before consuming messages
-    time.sleep(0.5)
+    time.sleep(0.1)
     channel.basic_consume(queue=user_name, on_message_callback=receive_notifications, auto_ack=True)
-    channel.start_consuming()
+    channel.start_consuming() 
+
