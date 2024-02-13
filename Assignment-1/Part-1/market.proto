@@ -181,10 +181,25 @@ message RateItemResponse {
 
 message NotifyBuyerRequest {
   string item_id = 1;
-  ItemDetails item_details = 2;
+  string item_name = 2;
 }
 
 message NotifyBuyerResponse {
+  enum Status {
+    SUCCESS = 0;
+    FAILED = 1;
+  }
+  Status status = 1;
+}
+
+message NotifySellerRequest {
+  string item_id = 1;
+  string item_name = 2;
+  int32 quantity = 3;
+  string buyer_address = 4;
+}
+
+message NotifySellerResponse {
   enum Status {
     SUCCESS = 0;
     FAILED = 1;
@@ -202,5 +217,9 @@ service MarketService {
   rpc BuyItem(BuyItemRequest) returns (BuyItemResponse);
   rpc AddToWishList(AddToWishListRequest) returns (AddToWishListResponse);
   rpc RateItem(RateItemRequest) returns (RateItemResponse);
+}
+
+service NotificationService {
   rpc NotifyBuyer(NotifyBuyerRequest) returns (NotifyBuyerResponse);
+  rpc NotifySeller(NotifySellerRequest) returns (NotifySellerResponse);
 }
