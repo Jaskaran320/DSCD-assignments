@@ -143,7 +143,7 @@ class MarketServicer(market_pb2_grpc.MarketServiceServicer):
         for item_id, item_details in self.items.items():
             if (not item_name
                 or item_details["product_name"].lower() == item_name.lower()) \
-                and (category == "any" or category == item_details["category"]):
+                and (category == "any" or category == get_category_string(item_details["category"])):
                 matched_item = market_pb2.SearchItemResponse.Item(
                     item_id=item_id,
                     product_name=item_details["product_name"],
@@ -246,16 +246,15 @@ class MarketServicer(market_pb2_grpc.MarketServiceServicer):
                 item_details = self.items[item_id]
                 request = market_pb2.NotifyBuyerRequest(
                     item_id=item_id,
-                    # item_details=market_pb2.ItemDetails(
-                    #     product_name=item_details["product_name"],
-                    #     category=market_pb2.Category.Value(item_details["category"]),
-                    #     quantity=item_details["quantity"],
-                    #     description=item_details["description"],
-                    #     seller_address=item_details["seller_address"],
-                    #     price_per_unit=item_details["price_per_unit"],
-                    #     rating=item_details["rating"]
-                    # )
-                    item_name=item_details["product_name"],
+                    item_details=market_pb2.ItemDetails(
+                        product_name=item_details["product_name"],
+                        category=item_details["category"],
+                        quantity=item_details["quantity"],
+                        description=item_details["description"],
+                        seller_address=item_details["seller_address"],
+                        price_per_unit=item_details["price_per_unit"],
+                        rating=item_details["rating"]
+                    )
                 )
                 response = stub.NotifyBuyer(request)
                 if response.status == market_pb2.NotifyBuyerResponse.SUCCESS:
@@ -295,4 +294,5 @@ def serve():
 
 
 if __name__ == "__main__":
+    print("Market is running")
     serve()

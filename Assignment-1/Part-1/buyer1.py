@@ -15,9 +15,8 @@ def search_item(item_name, category):
     request = market_pb2.SearchItemRequest(item_name=item_name, category=category)
     response = stub.SearchItem(request)
     for item in response.items:
-        print(
-            f"Item ID: {item.item_id}, Price: ${item.price_per_unit}, Name: {item.product_name}, Category: {get_category_string(item.category)}"
-        )
+        print(f"Item ID: {item.item_id}, Price: ${item.price_per_unit}, "
+            f"Name: {item.product_name}, Category: {get_category_string(item.category)}")
         print(f"Description: {item.description}")
         print(f"Quantity Remaining: {item.quantity}")
         print(f"Rating: {item.rating} / 5  |  Seller: {item.seller_address}\n")
@@ -73,7 +72,13 @@ def rate_item(item_id, buyer_address, rating):
 class NotificationServicer(market_pb2_grpc.NotificationServiceServicer):
 
     def NotifyBuyer(request, context):
-        print(f"Notification: Item {request.item_id}, {request.item_name} has been updated by the seller")
+        item_details = request.item_details
+        print(f"The following item has been updated:\n"
+            f"Item ID: {request.item_id}\n"
+            f"Name: {item_details.product_name}, Price: {item_details.price_per_unit}\n"
+            f"Category: {get_category_string(item_details.category)}, Quantity: {item_details.quantity}\n"
+            f"Description: {item_details.description}\n"
+            f"Rating: {item_details.rating} / 5 | Seller: {item_details.seller_address}\n")
         response = market_pb2.NotifyBuyerResponse()
         response.status = market_pb2.NotifyBuyerResponse.Status.SUCCESS
         return response
@@ -93,7 +98,7 @@ def run_grpc_server():
     market_pb2_grpc.add_NotificationServiceServicer_to_server(
         NotificationServicer, server
     )
-    server.add_insecure_port("[::]:50053")
+    server.add_insecure_port("[::]:50054")
     server.start()
     stop_event.wait()
     server.stop(0)
@@ -106,9 +111,9 @@ if __name__ == "__main__":
     server_thread = threading.Thread(target=run_grpc_server)
     server_thread.start()
 
-    buyer_address = "localhost:50053"
+    buyer_address = "localhost:50054"
     print("Welcome to the Online Market Place")
-    
+
     while True:
         print("1. Search Item")
         print("2. Buy Item")

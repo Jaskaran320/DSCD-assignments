@@ -181,7 +181,7 @@ message RateItemResponse {
 
 message NotifyBuyerRequest {
   string item_id = 1;
-  string item_name = 2;
+  ItemDetails item_details = 2;
 }
 
 message NotifyBuyerResponse {

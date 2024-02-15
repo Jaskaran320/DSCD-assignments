@@ -10,10 +10,9 @@ stop_event = threading.Event()
 market_ip = "localhost:50051"
 
 
-def register_seller(seller_uuid, seller_address):
+def register_seller(seller_info):
     channel = grpc.insecure_channel(market_ip)
     stub = market_pb2_grpc.MarketServiceStub(channel)
-    seller_info = market_pb2.SellerInfo(address=seller_address, uuid=str(seller_uuid))
     request = market_pb2.RegisterSellerRequest(seller_info=seller_info)
     response = stub.RegisterSeller(request)
     if response.status == market_pb2.RegisterSellerResponse.Status.SUCCESS:
@@ -22,20 +21,9 @@ def register_seller(seller_uuid, seller_address):
         print("SELLER ALREADY EXISTS\n")
 
 
-def sell_item(seller_uuid, seller_address):
+def sell_item(seller_info, item_details):
     channel = grpc.insecure_channel(market_ip)
     stub = market_pb2_grpc.MarketServiceStub(channel)
-    seller_info = market_pb2.SellerInfo(address=seller_address, uuid=str(seller_uuid))
-    product_name = "iPhone 15"
-    item_details = market_pb2.ItemDetails(
-        product_name=product_name,
-        category=market_pb2.ItemDetails.Category.electronics,
-        quantity=10,
-        description="This is a phone",
-        seller_address=seller_address,
-        price_per_unit=10_000.0,
-        rating=0.0,
-    )
     request = market_pb2.SellItemRequest(
         seller_info=seller_info, item_details=item_details
     )
@@ -47,13 +35,12 @@ def sell_item(seller_uuid, seller_address):
         print("INVALID SELLER\n")
 
 
-def update_item(new_item_id, new_quantity, new_price_per_unit, seller_uuid, seller_address):
+def update_item(item_id, new_quantity, new_price_per_unit, seller_info):
     channel = grpc.insecure_channel(market_ip)
     stub = market_pb2_grpc.MarketServiceStub(channel)
-    seller_info = market_pb2.SellerInfo(address=seller_address, uuid=str(seller_uuid))
     request = market_pb2.UpdateItemRequest(
         seller_info=seller_info,
-        item_id=new_item_id,
+        item_id=item_id,
         new_quantity=new_quantity,
         new_price_per_unit=new_price_per_unit,
     )
@@ -66,10 +53,9 @@ def update_item(new_item_id, new_quantity, new_price_per_unit, seller_uuid, sell
         print("SUCCESS\n")
 
 
-def delete_item(item_id, seller_uuid, seller_address):
+def delete_item(item_id, seller_info):
     channel = grpc.insecure_channel(market_ip)
     stub = market_pb2_grpc.MarketServiceStub(channel)
-    seller_info = market_pb2.SellerInfo(address=seller_address, uuid=str(seller_uuid))
     request = market_pb2.DeleteItemRequest(seller_info=seller_info, item_id=item_id)
     response = stub.DeleteItem(request)
     if response.status == market_pb2.UpdateItemResponse.Status.INVALID_SELLER:
@@ -80,17 +66,15 @@ def delete_item(item_id, seller_uuid, seller_address):
         print("SUCCESS\n")
 
 
-def display_seller_items(seller_uuid, seller_address):
+def display_seller_items(seller_info):
     channel = grpc.insecure_channel(market_ip)
     stub = market_pb2_grpc.MarketServiceStub(channel)
-    seller_info = market_pb2.SellerInfo(address=seller_address, uuid=str(seller_uuid))
     request = market_pb2.DisplaySellerItemsRequest(seller_info=seller_info)
     response = stub.DisplaySellerItems(request)
     if response.status == market_pb2.DisplaySellerItemsResponse.Status.SUCCESS:
         for item in response.items:
-            print(
-                f"Item ID: {item.item_id}, Price: ${item.price_per_unit}, Name: {item.product_name}, Category: {get_category_string(item.category)}"
-            )
+            print(f"Item ID: {item.item_id}, Price: ${item.price_per_unit}, "
+                f"Name: {item.product_name}, Category: {get_category_string(item.category)}")
             print(f"Description: {item.description}")
             print(f"Quantity Remaining: {item.quantity}")
             print(f"Seller: {item.seller_address}")
@@ -103,7 +87,8 @@ def display_seller_items(seller_uuid, seller_address):
 class NotificationServicer(market_pb2_grpc.NotificationServiceServicer):
 
     def NotifySeller(request, context):
-        print(f"Notification: Item {request.item_id}, {request.item_name}, quantity {request.quantity} has been bought by buyer {request.buyer_address}")
+        print(f"Notification: Item {request.item_id}, {request.item_name}, "
+            f"quantity {request.quantity} has been bought by buyer {request.buyer_address}")
         response = market_pb2.NotifySellerResponse()
         response.status = market_pb2.NotifySellerResponse.Status.SUCCESS
         return response
@@ -120,9 +105,7 @@ def signal_handler(signal, frame):
 
 def run_grpc_server():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    market_pb2_grpc.add_NotificationServiceServicer_to_server(
-        NotificationServicer, server
-    )
+    market_pb2_grpc.add_NotificationServiceServicer_to_server(NotificationServicer, server)
     server.add_insecure_port("[::]:50052")
     server.start()
     stop_event.wait()
@@ -138,6 +121,12 @@ if __name__ == "__main__":
 
     seller_address = "localhost:50052"
     seller_uuid = uuid.uuid1()
+    seller_info = market_pb2.SellerInfo(address=seller_address, uuid=str(seller_uuid))
+    category_sent = {
+        "electronics": market_pb2.ItemDetails.Category.electronics,
+        "fashion": market_pb2.ItemDetails.Category.fashion,
+        "others": market_pb2.ItemDetails.Category.others,
+    }
 
     while True:
         print("1. Register Seller")
@@ -148,21 +137,33 @@ if __name__ == "__main__":
         print("6. Exit")
         choice = input("Enter your choice:\n")
         if choice == "1":
-            register_seller(seller_uuid, seller_address)
+            register_seller(seller_info)
         elif choice == "2":
-            sell_item(seller_uuid, seller_address)
+            product_name = str(input("Enter the product name: "))
+            category = str(input("Enter the category (electronics, fashion, others): "))
+            quantity = int(input("Enter the quantity: "))
+            description = str(input("Enter the description: "))
+            price_per_unit = float(input("Enter the price per unit: "))
+            item_details = market_pb2.ItemDetails(
+                product_name=product_name,
+                category=category_sent[category],
+                quantity=quantity,
+                description=description,
+                seller_address=seller_address,
+                price_per_unit=price_per_unit,
+                rating=0.0,
+            )
+            sell_item(seller_info, item_details)
         elif choice == "3":
             item_id = input("Enter the item ID: ")
             new_quantity = int(input("Enter the new quantity: "))
             new_price_per_unit = float(input("Enter the new price per unit: "))
-            update_item(
-                item_id, new_quantity, new_price_per_unit, seller_uuid, seller_address
-            )
+            update_item(item_id, new_quantity, new_price_per_unit, seller_info)
         elif choice == "4":
             item_id = input("Enter the item ID: ")
-            delete_item(item_id, seller_uuid, seller_address)
+            delete_item(item_id, seller_info)
         elif choice == "5":
-            display_seller_items(seller_uuid, seller_address)
+            display_seller_items(seller_info)
         elif choice == "6":
             stop_event.set()
             break
