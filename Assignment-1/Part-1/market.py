@@ -70,7 +70,7 @@ class MarketServicer(market_pb2_grpc.MarketServiceServicer):
 
         if item_id not in self.items:
             response = market_pb2.UpdateItemResponse()
-            response.status = market_pb2.UpdateItemResponse.Status.FAILED
+            response.status = market_pb2.UpdateItemResponse.Status.INVALID_ITEM_ID
             return response
 
         self.items[item_id]["quantity"] = new_quantity
