@@ -5,8 +5,10 @@ import sys
 youtuber_name = sys.argv[1]
 video_name = sys.argv[2]
 
+creds = pika.PlainCredentials('test', 'test')
+connection = pika.BlockingConnection(pika.ConnectionParameters('34.0.7.140',credentials=creds))
+# connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
 
-connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
 channel = connection.channel()
 
 channel.queue_declare(queue='youtuber_queue',durable=True)

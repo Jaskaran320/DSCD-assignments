@@ -107,17 +107,16 @@ def handle_youtuber(ch, method, properties, body):
         youtubers[youtuber].append(video)
         print("Video added")
         # publish the video to the dedicated queue for the youtuber
-        for user in users.keys():
-            if youtuber in users[user]:
-                message = f'{{"youtuber": "{youtuber}", "video": "{video}"}}'
-                channel.basic_publish(exchange=youtuber, routing_key="", body=message)
-                print(f"Video published to {user}")
+        # for user in users.keys():
+        #     if youtuber in users[user]:
+        message = f'{{"youtuber": "{youtuber}", "video": "{video}"}}'
+        channel.basic_publish(exchange=youtuber, routing_key="", body=message)
     else:
         # add the youtuber to the list of youtubers
         youtubers[youtuber]=[video]
         print("Youtuber added")
         print("Video added")
-
+        channel.exchange_declare(exchange=youtuber, exchange_type="fanout")
         for user in users.keys():
             if youtuber in users[user]:
                 message = f'{{"youtuber": "{youtuber}", "video": "{video}"}}'
