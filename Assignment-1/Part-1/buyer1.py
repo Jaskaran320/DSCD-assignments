@@ -50,6 +50,8 @@ def add_to_wishlist(item_id, buyer_address):
         print("SUCCESS\n")
     elif response.status == market_pb2.AddToWishListResponse.ITEM_ALREADY_IN_WISHLIST:
         print("ITEM ALREADY IN WISHLIST\n")
+    elif response.status == market_pb2.AddToWishListResponse.ITEM_NOT_FOUND:
+        print("INVALID ITEM ID\n")
     channel.close()
 
 

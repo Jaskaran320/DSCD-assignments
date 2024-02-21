@@ -192,6 +192,11 @@ class MarketServicer(market_pb2_grpc.MarketServiceServicer):
         buyer_address = request.buyer_address
         print(f"Wishlist request for item {item_id}, from {buyer_address}")
 
+        if item_id not in self.items:
+            response = market_pb2.AddToWishListResponse()
+            response.status = market_pb2.AddToWishListResponse.Status.ITEM_NOT_FOUND
+            return response
+
         if buyer_address in self.wishlist:
             if item_id in self.wishlist[buyer_address]:
                 response = market_pb2.AddToWishListResponse()
