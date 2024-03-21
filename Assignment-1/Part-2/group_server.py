@@ -19,7 +19,7 @@ group_id = random.randint(1000, 9999)
 
 #  Socket to talk to server
 message_server_socket = context.socket(zmq.REQ)
-message_server_socket.connect("tcp://localhost:5555")
+message_server_socket.connect("tcp://34.143.209.14:5555")
 
 group_server_socket = context.socket(zmq.ROUTER)
 group_server_socket.bind("tcp://*:"+str(client_port))
