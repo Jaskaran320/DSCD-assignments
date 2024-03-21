@@ -23,7 +23,7 @@ message AppendEntriesArgs {
   string leaderID = 2;
   int32 prevLogIndex = 3;
   int32 prevLogTerm = 4;
-  repeated Entry entries = 5;
+  Entry entry = 5;
   int32 leaderCommit = 6;
   float leaseDuration = 7;
 }
