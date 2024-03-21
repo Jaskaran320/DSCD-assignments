@@ -141,6 +141,9 @@ if __name__ == "__main__":
         elif choice == "2":
             product_name = str(input("Enter the product name: "))
             category = str(input("Enter the category (electronics, fashion, others): "))
+            if category not in ["electronics", "fashion", "others"]:
+                print("Invalid category\n")
+                continue
             quantity = int(input("Enter the quantity: "))
             description = str(input("Enter the description: "))
             price_per_unit = float(input("Enter the price per unit: "))

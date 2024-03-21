@@ -70,7 +70,7 @@ class MarketServicer(market_pb2_grpc.MarketServiceServicer):
 
         if item_id not in self.items:
             response = market_pb2.UpdateItemResponse()
-            response.status = market_pb2.UpdateItemResponse.Status.FAILED
+            response.status = market_pb2.UpdateItemResponse.Status.INVALID_ITEM_ID
             return response
 
         self.items[item_id]["quantity"] = new_quantity
@@ -191,6 +191,11 @@ class MarketServicer(market_pb2_grpc.MarketServiceServicer):
         item_id = request.item_id
         buyer_address = request.buyer_address
         print(f"Wishlist request for item {item_id}, from {buyer_address}")
+
+        if item_id not in self.items:
+            response = market_pb2.AddToWishListResponse()
+            response.status = market_pb2.AddToWishListResponse.Status.ITEM_NOT_FOUND
+            return response
 
         if buyer_address in self.wishlist:
             if item_id in self.wishlist[buyer_address]:

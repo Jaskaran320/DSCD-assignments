@@ -159,7 +159,7 @@ message AddToWishListResponse {
   enum Status {
     SUCCESS = 0;
     ITEM_ALREADY_IN_WISHLIST = 1;
-    FAILED = 2;
+    ITEM_NOT_FOUND = 2;
   }
   Status status = 1;
 }
