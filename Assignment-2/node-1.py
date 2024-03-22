@@ -3,9 +3,9 @@ import grpc
 import random
 import time
 import threading
+import shutil
 from collections import defaultdict
 from concurrent import futures
-import shutil
 import raft_pb2
 import raft_pb2_grpc
 
@@ -22,9 +22,9 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         self.leader_id = None
         self.next_index = defaultdict(lambda: 0)
         self.match_index = defaultdict(lambda: 0)
-        self.election_timeout = random.uniform(3, 5)
+        self.election_timeout = random.uniform(5, 10)
         self.heartbeat_timeout = 1
-        self.lease_timeout = 7
+        self.lease_timeout = 4
         self.lease_acquired = False
         self.lease_start_time = 0
         self.old_leader_lease_end_time = 0
@@ -212,7 +212,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                 try:
                     stub = self.get_stub(node_id)
                     response = stub.AppendEntries(args)
-                    print("Sending from send_heartbeat", self.node_id)
+                    print("Sending from send_heartbeat, node", self.node_id)
                     if response.success:
                         self.match_index[node_id] = args.prevLogIndex + 1 # len(args.entry)
                         self.next_index[node_id] = self.match_index[node_id] + 1
@@ -227,6 +227,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         # self.check_commit_length()
         self.restart_heartbeat_timer()
 
+
     def send_append_entries(self, entry):
         prev_log_index = len(self.log) - 1
         prev_log_term = self.log[-1][3] if self.log else 0
@@ -240,34 +241,37 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
             leaseDuration=self.lease_timeout,
         )
 
+        time.sleep(self.heartbeat_timeout)
+        self.restart_heartbeat_timer()
+
         for node_id in range(self.num_nodes):
             if node_id != self.node_id:
-                # try:
-                stub = self.get_stub(node_id)
-                response = stub.AppendEntries(args)
-                print("Sending from send_append_entries", self.node_id)
-                # self.log_file.write(
-                #     f"Node {node_id} received AppendEntries RPC from {self.node_id}.\n"
-                # )
-                # self.log_file.flush()
-                if response.success:
-                    self.match_index[node_id] = prev_log_index + 1 # len(args.entry)
-                    self.next_index[node_id] = self.match_index[node_id] + 1
+                try:
+                    stub = self.get_stub(node_id)
+                    response = stub.AppendEntries(args)
+                    print("Sending from send_append_entries", self.node_id)
+                    # self.log_file.write(
+                    #     f"Node {node_id} received AppendEntries RPC from {self.node_id}.\n"
+                    # )
+                    # self.log_file.flush()
+                    if response.success == True:
+                        self.match_index[node_id] = prev_log_index + 1 # len(args.entry)
+                        self.next_index[node_id] = self.match_index[node_id] + 1
+                        self.dump_file.write(
+                            f"Node {node_id} accepted AppendEntries RPC from {self.node_id}.\n"
+                        )
+                        self.dump_file.flush()
+                    else:
+                        self.next_index[node_id] -= 1
+                        self.dump_file.write(
+                            f"Node {node_id} rejected AppendEntries RPC from {self.node_id}.\n"
+                        )
+                        self.dump_file.flush()
+                except grpc.RpcError:
                     self.dump_file.write(
-                        f"Node {node_id} accepted AppendEntries RPC from {self.node_id}.\n"
+                        f"send_append_entries Error occurred while sending RPC to Node {node_id}.\n"
                     )
                     self.dump_file.flush()
-                else:
-                    self.next_index[node_id] -= 1
-                    self.dump_file.write(
-                        f"Node {node_id} rejected AppendEntries RPC from {self.node_id}.\n"
-                    )
-                    self.dump_file.flush()
-                # except grpc.RpcError:
-                #     self.dump_file.write(
-                #         f"send_append_entries Error occurred while sending RPC to Node {node_id}.\n"
-                #     )
-                #     self.dump_file.flush()
 
         # self.check_commit_length()
         self.commit_entry(entry)
@@ -451,6 +455,10 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                 voteGranted=False,
                 oldLeaderLeaseDuration=self.old_leader_lease_end_time - time.time(),
             )
+        else:
+            self.current_term = candidate_term
+            self.voted_for = None
+            self.persist_metadata()
 
         if self.state == "FOLLOWER":
             self.restart_election_timer()

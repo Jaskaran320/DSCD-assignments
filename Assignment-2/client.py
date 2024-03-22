@@ -6,7 +6,7 @@ import raft_pb2_grpc
 class RaftClient:
     def __init__(self, node_addresses):
         self.node_addresses = node_addresses
-        self.leader_id = None
+        self.leader_id = "None"
         self.channels = {
             address: grpc.insecure_channel(address) for address in node_addresses
         }
@@ -16,40 +16,44 @@ class RaftClient:
         }
 
     def send_request(self, request):
-        if self.leader_id is None:
+        if self.leader_id =="None":
             try:
                 response = self.stubs['localhost:50051'].ServeClient(raft_pb2.ServeClientArgs(request=request))
                 if response.success:
                     self.leader_id = response.leaderID
-                    print(f"Leader ID: {self.leader_id}")
+                    print(f"1-Leader ID: {self.leader_id}")
                     return response.data
                 else:
+                    print(f"2-Leader ID: {response.leaderID}")
                     self.leader_id = response.leaderID
-                    response = self.stubs[self.node_addresses[self.leader_id]].ServeClient(
-                        raft_pb2.ServeClientArgs(request=request)
-                    )
-                    print(f"Leader ID: {self.leader_id}")
-                    return response.data
-            except grpc.RpcError as e:
-                print(f"RPC error: {e}")
-        else:
-            try:
-                response = self.stubs[self.node_addresses[self.leader_id]].ServeClient(
-                    raft_pb2.ServeClientArgs(request=request)
-                )
-                if response.success:
-                    self.leader_id = response.leaderID
-                    return response.data
-                else:
-                    self.leader_id = response.leaderID
-                    response = self.stubs[self.node_addresses[self.leader_id]].ServeClient(
+                    response = self.stubs[self.node_addresses[int(self.leader_id)]].ServeClient(
                         raft_pb2.ServeClientArgs(request=request)
                     )
                     return response.data
             except grpc.RpcError as e:
                 print(f"RPC error: {e}")
         
-        return "" # None
+        else:
+            try:
+                response = self.stubs[self.node_addresses[int(self.leader_id)]].ServeClient(
+                    raft_pb2.ServeClientArgs(request=request)
+                )
+                if response.success:
+                    print(f"3-Leader ID: {response.leaderID}")
+                    self.leader_id = response.leaderID
+                    return response.data
+                else:
+                    print(f"4-Leader ID: {response.leaderID}")
+                    self.leader_id = response.leaderID
+                    if self.leader_id != "None":
+                        response = self.stubs[self.node_addresses[int(self.leader_id)]].ServeClient(
+                            raft_pb2.ServeClientArgs(request=request)
+                        )
+                        return response.data
+            except grpc.RpcError as e:
+                print(f"RPC error: {e}")
+        
+        return ""
 
     def get(self, key):
         return self.send_request(f"GET {key}")
