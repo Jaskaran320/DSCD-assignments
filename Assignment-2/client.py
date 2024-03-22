@@ -16,17 +16,32 @@ class RaftClient:
         }
 
     def send_request(self, request):
+        # if self.leader_id is None:
         for node_address, stub in self.stubs.items():
             try:
                 response = stub.ServeClient(raft_pb2.ServeClientArgs(request=request))
                 if response.success:
                     self.leader_id = response.leaderID
+                    print(f"Leader ID: {self.leader_id}")
                     return response.data
                 elif response.leaderID:
                     self.leader_id = response.leaderID
+                    print(f"Leader ID: {self.leader_id}")
             except grpc.RpcError as e:
                 print(f"RPC error: {e}")
-        return None
+        # else:
+        #     try:
+        #         response = self.stubs[self.node_addresses[self.leader_id]].ServeClient(
+        #             raft_pb2.ServeClientArgs(request=request)
+        #         )
+        #         if response.success:
+        #             return response.data
+        #         elif not response.success and response.leaderID:
+        #             self.leader_id = response.leaderID
+        #     except grpc.RpcError as e:
+        #         print(f"RPC error: {e}")
+        
+        return "" # None
 
     def get(self, key):
         return self.send_request(f"GET {key}")
