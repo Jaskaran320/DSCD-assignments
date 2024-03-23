@@ -16,7 +16,7 @@ class RaftClient:
         }
 
     def send_request(self, request):
-        if self.leader_id =="None":
+        if self.leader_id == "None":
             try:
                 response = self.stubs['localhost:50051'].ServeClient(raft_pb2.ServeClientArgs(request=request))
                 if response.success:
@@ -25,6 +25,10 @@ class RaftClient:
                     return response.data
                 else:
                     print(f"2-Leader ID: {response.leaderID}")
+                    while response.leaderID == "None":
+                        response = self.stubs['localhost:50051'].ServeClient(
+                            raft_pb2.ServeClientArgs(request=request)
+                        )
                     self.leader_id = response.leaderID
                     response = self.stubs[self.node_addresses[int(self.leader_id)]].ServeClient(
                         raft_pb2.ServeClientArgs(request=request)

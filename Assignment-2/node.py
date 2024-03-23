@@ -257,7 +257,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                 if response.success:
                     self.match_index[node_id] = prev_log_index + 1 # len(args.entry)
                     self.next_index[node_id] = self.match_index[node_id] + 1
-                    self.check_commit_length()
+                    # self.check_commit_length()
                     self.dump_file.write(
                         f"Node {node_id} accepted AppendEntries RPC from {self.node_id}.\n"
                     )
@@ -364,10 +364,16 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                 )
 
     def get_value(self, key):
-        for entry in reversed(self.log):
-            operation, entry_key, value, term = entry
-            if operation == "SET" and entry_key == key:
-                return value
+        # for entry in reversed(self.log):
+        #     operation, entry_key, value, _ = entry
+        #     if operation == "SET" and entry_key == key:
+        #         return value
+
+        self.log_file.seek(0)
+        for line in reversed(list(self.log_file)):
+            entry = line.strip().split()
+            if entry[0] == "SET" and entry[1] == key:
+                return entry[2]
         return ""
 
     def AppendEntries(self, request, context):
