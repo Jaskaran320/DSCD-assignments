@@ -193,7 +193,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
             f"Leader {self.node_id} sending heartbeat & Renewing Lease\n"
         )
         self.dump_file.flush()
-        self.acquire_lease()
+        # self.acquire_lease()
         self.restart_lease_renewal_timer()
         entry = raft_pb2.Entry(
             operation="NO-OP", key="", value="", term=self.current_term
@@ -225,7 +225,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     )
                     self.dump_file.flush()
 
-        # self.check_commit_length()
+        self.check_commit_length()
         self.restart_heartbeat_timer()
 
     def send_append_entries(self, entry):
@@ -246,35 +246,35 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
 
         for node_id in range(self.num_nodes):
             if node_id != self.node_id:
-                # try:
-                stub = self.get_stub(node_id)
-                response = stub.AppendEntries(args)
-                print("Sending from send_append_entries", self.node_id)
-                # self.log_file.write(
-                #     f"Node {node_id} received AppendEntries RPC from {self.node_id}.\n"
-                # )
-                # self.log_file.flush()
-                if response.success:
-                    self.match_index[node_id] = prev_log_index + 1 # len(args.entry)
-                    self.next_index[node_id] = self.match_index[node_id] + 1
-                    # self.check_commit_length()
+                try:
+                    stub = self.get_stub(node_id)
+                    response = stub.AppendEntries(args)
+                    print("Sending from send_append_entries", self.node_id)
+                    # self.log_file.write(
+                    #     f"Node {node_id} received AppendEntries RPC from {self.node_id}.\n"
+                    # )
+                    # self.log_file.flush()
+                    if response.success:
+                        self.match_index[node_id] = prev_log_index + 1 # len(args.entry)
+                        self.next_index[node_id] = self.match_index[node_id] + 1
+                        self.check_commit_length()
+                        self.dump_file.write(
+                            f"Node {node_id} accepted AppendEntries RPC from {self.node_id}.\n"
+                        )
+                        self.dump_file.flush()
+                    else:
+                        self.next_index[node_id] -= 1
+                        self.dump_file.write(
+                            f"Node {node_id} rejected AppendEntries RPC from {self.node_id}.\n"
+                        )
+                        self.dump_file.flush()
+                except grpc.RpcError:
                     self.dump_file.write(
-                        f"Node {node_id} accepted AppendEntries RPC from {self.node_id}.\n"
+                        f"send_append_entries Error occurred while sending RPC to Node {node_id}.\n"
                     )
                     self.dump_file.flush()
-                else:
-                    self.next_index[node_id] -= 1
-                    self.dump_file.write(
-                        f"Node {node_id} rejected AppendEntries RPC from {self.node_id}.\n"
-                    )
-                    self.dump_file.flush()
-                # except grpc.RpcError:
-                #     self.dump_file.write(
-                #         f"send_append_entries Error occurred while sending RPC to Node {node_id}.\n"
-                #     )
-                #     self.dump_file.flush()
 
-        # self.check_commit_length()
+        self.check_commit_length()
         self.commit_entry(entry)
 
     def check_commit_length(self):
@@ -288,15 +288,21 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         )[: self.num_nodes // 2]
         if committed_entries:
             new_commit_length = committed_entries[0]
+            print(f"Old commit length: {self.commit_length}")
+            print(f"New commit length: {new_commit_length}")
+            print(f"Log: {self.log}")
             for i in range(self.commit_length + 1, new_commit_length + 1):
                 entry = self.log[i - 1]
-                self.commit_entry(entry)
+                self.commit_entry(entry, log=True)
             self.commit_length = new_commit_length
 
-    def commit_entry(self, entry):
-        operation = entry.operation
-        key = entry.key
-        value = entry.value
+    def commit_entry(self, entry, log=False):
+        if log:
+            operation, key, value, _ = entry
+        else:
+            operation = entry.operation
+            key = entry.key
+            value = entry.value
         # term = entry.term
         if operation == "SET":
             self.dump_file.write(
@@ -388,7 +394,6 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
             prev_log_term = request.prevLogTerm
             entry = request.entry
             print(f"Entry: {entry}")
-            print(f"Type: {type(entry)}")
             if (len(self.log) > prev_log_index
                 and self.log[prev_log_index][3] != prev_log_term):
                 self.log = self.log[:prev_log_index]

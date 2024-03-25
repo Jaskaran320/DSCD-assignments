@@ -7,8 +7,8 @@ from concurrent import futures
 
 if __name__ == "__main__":
     num_nodes = 5
-    # if os.path.exists("logs"):
-    #     shutil.rmtree("logs")
+    if os.path.exists("logs"):
+        shutil.rmtree("logs")
     ports = [50051, 50052, 50053, 50054, 50055]
     servers = []
 
