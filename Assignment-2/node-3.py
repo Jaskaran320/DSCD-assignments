@@ -124,7 +124,11 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                 try:
                     stub = self.get_stub(node_id)
                     response = stub.RequestVote(request)
-                    if response.voteGranted and self.state == "CANDIDATE" and self.current_term == response.term:
+                    if (
+                        response.voteGranted
+                        and self.state == "CANDIDATE"
+                        and self.current_term == response.term
+                    ):
                         self.votes += 1
                         print(
                             f"Vote granted to Node {self.node_id} in term {self.current_term} by Node {node_id}."
@@ -166,10 +170,10 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         # self.restart_election_timer()
         self.next_index = defaultdict(lambda: len(self.log) + 1)
         self.match_index = defaultdict(lambda: 0)
-        self.acquire_lease()
+        self.acquire_lease(flag=True)
         self.send_heartbeat()
 
-    def acquire_lease(self):
+    def acquire_lease(self, flag=False):
         self.lease_acquired = True
         self.lease_start_time = time.time()
         self.old_leader_lease_end_time = max(
@@ -179,10 +183,13 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         self.dump_file.flush()
         while time.time() < self.old_leader_lease_end_time:
             time.sleep(0.1)
-        self.append_noop_entry()
+        if flag:
+            self.append_noop_entry()
 
     def append_noop_entry(self):
-        entry = raft_pb2.Entry(operation="NO-OP", key="", value="", term=self.current_term)
+        entry = raft_pb2.Entry(
+            operation="NO-OP", key="", value="", term=self.current_term
+        )
         self.log.append(("NO-OP", "", "", self.current_term))
         self.persist_log(entry)
         self.send_append_entries(entry)
@@ -197,6 +204,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         self.dump_file.flush()
         self.acquire_lease()
         self.restart_lease_renewal_timer()
+
         entry = raft_pb2.Entry(
             operation="NO-OP", key="", value="", term=self.current_term
         )
@@ -205,7 +213,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
             leaderID=str(self.node_id),
             prevLogIndex=len(self.log) - 1,
             prevLogTerm=self.log[-1][3] if self.log else 0,
-            entry=entry,
+            entries=[entry],
             leaderCommit=self.commit_length,
             leaseDuration=self.lease_timeout,
         )
@@ -217,7 +225,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     response = stub.AppendEntries(args)
                     print("Sending from send_heartbeat, node", self.node_id)
                     if response.success:
-                        self.match_index[node_id] = args.prevLogIndex + 1 # len(args.entry)
+                        self.match_index[node_id] = args.prevLogIndex + len(args.entries)
                         self.next_index[node_id] = self.match_index[node_id] + 1
                     else:
                         self.next_index[node_id] -= 1
@@ -227,27 +235,45 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     )
                     self.dump_file.flush()
 
-        self.check_commit_length()
+        # self.check_commit_length()
         self.restart_heartbeat_timer()
 
     def send_append_entries(self, entry):
-        prev_log_index = len(self.log) - 1
-        prev_log_term = self.log[-1][3] if self.log else 0
-        args = raft_pb2.AppendEntriesArgs(
-            term=self.current_term,
-            leaderID=str(self.node_id),
-            prevLogIndex=prev_log_index,
-            prevLogTerm=prev_log_term,
-            entry=entry,
-            leaderCommit=self.commit_length,
-            leaseDuration=self.lease_timeout,
-        )
+        # prev_log_index = len(self.log) - 1
+        # prev_log_term = self.log[-1][3] if self.log else 0
+        if entry.operation != "SET" and (not self.log or self.log[-1] != (entry.operation, entry.key, entry.value, entry.term)):
+            self.log.append((entry.operation, entry.key, entry.value, entry.term))
+            self.persist_log(entry)
 
-        time.sleep(self.heartbeat_timeout)
-        self.restart_heartbeat_timer()
+        # time.sleep(self.heartbeat_timeout)
+        # self.restart_heartbeat_timer()
 
         for node_id in range(self.num_nodes):
             if node_id != self.node_id:
+                next_index = self.next_index[node_id]
+                prev_log_index = next_index - 1
+                prev_log_term = (
+                    self.log[prev_log_index][3]
+                    if self.log
+                    and prev_log_index >= 0
+                    and prev_log_index < len(self.log)
+                    else 0
+                )
+                entries = [
+                    raft_pb2.Entry(
+                        operation=entry[0], key=entry[1], value=entry[2], term=entry[3]
+                    )
+                    for entry in self.log[next_index:]
+                ]
+                args = raft_pb2.AppendEntriesArgs(
+                    term=self.current_term,
+                    leaderID=str(self.node_id),
+                    prevLogIndex=prev_log_index,
+                    prevLogTerm=prev_log_term,
+                    entries=entries,
+                    leaderCommit=self.commit_length,
+                    leaseDuration=self.lease_timeout,
+                )
                 try:
                     stub = self.get_stub(node_id)
                     response = stub.AppendEntries(args)
@@ -257,15 +283,16 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     # )
                     # self.log_file.flush()
                     if response.success:
-                        self.match_index[node_id] = prev_log_index + 1 # len(args.entry)
+                        self.match_index[node_id] = prev_log_index + len(args.entries)
                         self.next_index[node_id] = self.match_index[node_id] + 1
-                        self.check_commit_length()
+                        # self.check_commit_length()
+                        self.commit_entry(entry)
                         self.dump_file.write(
                             f"Node {node_id} accepted AppendEntries RPC from {self.node_id}.\n"
                         )
                         self.dump_file.flush()
                     else:
-                        self.next_index[node_id] -= 1
+                        self.next_index[node_id] = max(0, self.next_index[node_id] - 1)
                         self.dump_file.write(
                             f"Node {node_id} rejected AppendEntries RPC from {self.node_id}.\n"
                         )
@@ -276,24 +303,57 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     )
                     self.dump_file.flush()
 
-        self.check_commit_length()
-        self.commit_entry(entry)
+        self.check_commit_length(entry)
+        # self.commit_entry(entry)
 
-    def check_commit_length(self):
-        committed_entries = sorted(
-            (
-                index
-                for index, entry in self.match_index.items()
-                if entry > self.commit_length
-            ),
-            reverse=True,
-        )[: self.num_nodes // 2]
+    # def check_commit_length(self):
+    #     print(f"Match Index: {self.match_index}")
+    #     committed_entries = sorted(
+    #         (
+    #             index
+    #             for index, entry in self.match_index.items()
+    #             if entry > self.commit_length
+    #         ),
+    #         reverse=True,
+    #     )[: self.num_nodes // 2]
+    #     print(f"Committed Entries: {committed_entries}")
+    #     if committed_entries:
+    #         new_commit_length = committed_entries[0]
+    #         print(f"Old commit length: {self.commit_length}")
+    #         print(f"New commit length: {new_commit_length}")
+    #         print(f"Log: {self.log}")
+    #         for i in range(self.commit_length + 1, new_commit_length + 1):
+    #             entry = self.log[i - 1]
+    #             self.commit_entry(entry, log=True)
+    #         self.commit_length = new_commit_length
+
+    def check_commit_length(self, entry):
+        print(f"Match Index: {self.match_index}")
+
+        match_indices = list(self.match_index.values()) + [len(self.log)]
+        match_indices.sort(reverse=True)
+
+        committed_entries = match_indices[: self.num_nodes // 2 + 1]
+        print(f"Committed Entries: {committed_entries}")
+
         if committed_entries:
-            new_commit_length = committed_entries[0]
-            for i in range(self.commit_length + 1, new_commit_length + 1):
-                entry = self.log[i - 1]
-                self.commit_entry(entry, log=True)
-            self.commit_length = new_commit_length
+            new_commit_length = min(committed_entries)
+            print(f"Old commit length: {self.commit_length}")
+            print(f"New commit length: {new_commit_length}")
+            print(f"Log: {self.log}")
+
+            if (
+                new_commit_length > self.commit_length
+                and self.log[new_commit_length - 1][3] == self.current_term
+            ):
+
+                for i in range(self.commit_length + 1, new_commit_length + 1):
+                    entry = self.log[i - 1]
+                    self.commit_entry(entry, log=True)
+                self.commit_length = new_commit_length
+            else:
+                if entry:
+                    self.commit_entry(entry, log=False)
 
     def commit_entry(self, entry, log=False):
         if log:
@@ -302,7 +362,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
             operation = entry.operation
             key = entry.key
             value = entry.value
-        # term = entry.term
+
         if operation == "SET":
             self.dump_file.write(
                 f"Node {self.node_id} (leader) committed the entry SET {key} {value} to the state machine.\n"
@@ -391,66 +451,63 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
 
             prev_log_index = request.prevLogIndex
             prev_log_term = request.prevLogTerm
-            entry = request.entry
-            print(f"Entry: {entry}")
-            if (len(self.log) > prev_log_index
-                and self.log[prev_log_index][3] != prev_log_term):
+            entries = request.entries
+            # print(f"Entry: {entry}")
+
+            if len(self.log) <= prev_log_index:
+                self.log = self.log[:prev_log_index]
+
+            if (
+                len(self.log) > prev_log_index
+                and self.log[prev_log_index][3] != prev_log_term
+            ):
                 self.log = self.log[:prev_log_index]
             # if entry:
             #     self.log.append((entry.operation, entry.key, entry.value, entry.term))
             #     self.persist_log(entry)
-            
+
             # if len(self.log) > prev_log_index:
             #     self.log = self.log[:prev_log_index + 1]
-            self.log.append((entry.operation, entry.key, entry.value, entry.term))
-            self.persist_log(entry)
+            # if len(self.log) <= prev_log_index:
+            #     self.log = self.log[:prev_log_index]
+
+            # elif self.log[prev_log_index][3] != prev_log_term:
+            #     self.log = self.log[:prev_log_index]
+            for entry in entries:
+                if entry.operation != "SET" and self.log and self.log[-1] == (entry.operation, entry.key, entry.value, entry.term):
+                    continue
+                self.log.append((entry.operation, entry.key, entry.value, entry.term))
+                self.persist_log(entry)
+
+            # self.log.append((entry.operation, entry.key, entry.value, entry.term))
+            # self.persist_log(entry)
 
             if request.leaderCommit > self.commit_length:
                 self.commit_length = min(request.leaderCommit, len(self.log))
-                # for i in range(self.commit_length - len(self.log) + 1, self.commit_length + 1):
-                #     entry = self.log[i]
-                #     self.dump_file.write(f"Node {self.node_id} (follower) committed the entry "
-                #         f"{entry[0]} {entry[1]} {entry[2]} to the state machine.\n")
-                #     self.dump_file.flush()
+                for i in range(
+                    self.commit_length - len(request.entries), self.commit_length
+                ):
 
-                self.dump_file.write(
-                    f"Node {self.node_id} (follower) committed the entry "
-                    f"{entry.operation} {entry.key} {entry.value} to the state machine.\n"
-                )
-                self.dump_file.flush()
+                    entry = self.log[i]
+                    self.dump_file.write(
+                        f"Node {self.node_id} (follower) committed the entry "
+                        f"{entry[0]} {entry[1]} {entry[2]} to the state machine.\n"
+                    )
+                    self.dump_file.flush()
+                    self.commit_entry(entry, log=True)
+
+                # self.dump_file.write(
+                #     f"Node {self.node_id} (follower) committed the entry "
+                #     f"{entry.operation} {entry.key} {entry.value} to the state machine.\n"
+                # )
+                # self.dump_file.flush()
+
+            if self.state == "FOLLOWER" and self.current_term <= request.term:
+                self.match_index[self.node_id] = prev_log_index + len(entries)
 
             return raft_pb2.AppendEntriesReply(term=self.current_term, success=True)
         else:
             return raft_pb2.AppendEntriesReply(term=self.current_term, success=False)
-
-    # def RequestVote(self, request, context):
-    #     candidate_id = request.candidateID
-    #     candidate_term = request.term
-    #     candidate_last_log_index = request.lastLogIndex
-    #     candidate_last_log_term = request.lastLogTerm
-
-    #     print(f"Candidate ID: {candidate_id}, Candidate term: {candidate_term}")
-    #     print(f"Candidate last log index: {candidate_last_log_index}, Candidate last log term: {candidate_last_log_term}")
-
-    #     if self.current_term <= candidate_term and (self.voted_for is None or self.voted_for == candidate_id):
-    #         if self.state == "FOLLOWER":
-    #             self.restart_election_timer()
-    #         if len(self.log) < candidate_last_log_index or \
-    #         (len(self.log) == candidate_last_log_index and len(self.log) > 0 and self.log[-1][3] <= candidate_last_log_term):
-    #             self.current_term = candidate_term
-    #             self.voted_for = candidate_id
-    #             self.persist_metadata()
-    #             self.dump_file.write(f"Vote granted for Node {candidate_id} in term {candidate_term}.\n")
-    #             return raft_pb2.RequestVoteReply(term=self.current_term, voteGranted=True,
-    #                                              oldLeaderLeaseDuration=self.old_leader_lease_end_time - time.time())
-    #         else:
-    #             self.dump_file.write(f"Vote denied for Node {candidate_id} in term {candidate_term}.\n")
-    #             return raft_pb2.RequestVoteReply(term=self.current_term, voteGranted=False,
-    #                                              oldLeaderLeaseDuration=self.old_leader_lease_end_time - time.time())
-    #     else:
-    #         self.dump_file.write(f"Vote denied for Node {candidate_id} in term {candidate_term}.\n")
-    #         return raft_pb2.RequestVoteReply(term=self.current_term, voteGranted=False,
-    #                                          oldLeaderLeaseDuration=self.old_leader_lease_end_time - time.time())
 
     def RequestVote(self, request, context):
         candidate_id = request.candidateID
@@ -548,7 +605,7 @@ if __name__ == "__main__":
         raft_pb2_grpc.add_RaftNodeServicer_to_server(raft_node_instance, server)
         server.add_insecure_port("[::]:50053")
         server.start()
-        print(f"Raft node 3 started on port 50053")
+        print(f"Raft node 2 started on port 50053")
         server.wait_for_termination()
 
     except KeyboardInterrupt:
