@@ -234,6 +234,8 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
             leaseDuration=self.lease_timeout,
         )
 
+        active_nodes = 0
+
         for node_id in range(self.num_nodes):
             if node_id != self.node_id:
                 try:
@@ -241,7 +243,10 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     response = stub.AppendEntries(args)
                     print("Sending from send_heartbeat, node", self.node_id)
                     if response.success:
-                        self.match_index[node_id] = args.prevLogIndex + len(args.entries)
+                        active_nodes += 1
+                        self.match_index[node_id] = args.prevLogIndex + len(
+                            args.entries
+                        )
                         self.next_index[node_id] = self.match_index[node_id] + 1
                     else:
                         self.next_index[node_id] -= 1
@@ -251,9 +256,15 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     )
                     self.dump_file.flush()
 
+        if active_nodes < self.num_nodes // 2:
+            self.dump_file.write(
+                f"Leader {self.node_id} lost majority of nodes. Stepping Down.\n"
+            )
+            self.dump_file.flush()
+            self.step_down()
+            
         # self.check_commit_length()
         self.restart_heartbeat_timer()
-
     def send_append_entries(self, entry):
         # prev_log_index = len(self.log) - 1
         # prev_log_term = self.log[-1][3] if self.log else 0
@@ -644,5 +655,11 @@ if __name__ == "__main__":
         server.wait_for_termination()
 
     except KeyboardInterrupt:
+        raft_node_instance.step_down()
+        raft_node_instance.election_timer.cancel()
+        raft_node_instance.heartbeat_timer.cancel()
+        if raft_node_instance.lease_renewal_thread:
+            raft_node_instance.lease_renewal_thread.join()
+
         print("Shutting down server...")
         server.stop(None)
