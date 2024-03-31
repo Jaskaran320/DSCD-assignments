@@ -22,7 +22,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         self.leader_id = None
         self.next_index = defaultdict(lambda: 0)
         self.match_index = defaultdict(lambda: 0)
-        self.election_timeout = random.uniform(5, 10)
+        self.election_timeout = 5  # random.uniform(5, 10)
         self.heartbeat_timeout = 1
         self.lease_timeout = 4
         self.lease_acquired = False
@@ -84,7 +84,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         self.heartbeat_timer.start()
 
     def start_lease_renewal_timer(self):
-        self.lease_renewal_timer = threading.Timer(self.lease_timeout, self.renew_lease)
+        self.lease_renewal_timer = threading.Timer(self.lease_timeout, self.step_down)
         self.lease_renewal_timer.start()
 
     def restart_election_timer(self):
@@ -160,6 +160,9 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         if self.votes > self.num_nodes // 2:
             self.become_leader()
 
+        else:
+            self.restart_election_timer()
+
     def become_leader(self):
         self.dump_file.write(
             f"Node {self.node_id} became the leader for term {self.current_term}.\n"
@@ -171,10 +174,10 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         # self.restart_election_timer()
         self.next_index = defaultdict(lambda: len(self.log) + 1)
         self.match_index = defaultdict(lambda: 0)
-        self.acquire_lease(flag=True)
+        self.acquire_lease()
         self.send_heartbeat()
 
-    def acquire_lease(self, flag=False):
+    def acquire_lease(self):
         self.lease_acquired = True
         self.lease_start_time = time.time()
         self.old_leader_lease_end_time = max(
@@ -185,21 +188,21 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         while time.time() < self.old_leader_lease_end_time:
             time.sleep(0.1)
 
-        self.start_lease_renewal_thread()
+        # self.start_lease_renewal_thread()
 
         # if flag:
         #     self.append_noop_entry()
 
-    def start_lease_renewal_thread(self):
-        self.lease_renewal_thread = threading.Thread(
-            target=self.renew_lease_periodically
-        )
-        self.lease_renewal_thread.start()
+    # def start_lease_renewal_thread(self):
+    #     self.lease_renewal_thread = threading.Thread(
+    #         target=self.renew_lease_periodically
+    #     )
+    #     self.lease_renewal_thread.start()
 
-    def renew_lease_periodically(self):
-        while self.state == "LEADER" and self.lease_acquired:
-            self.renew_lease()
-            time.sleep(self.lease_timeout / 2)
+    # def renew_lease_periodically(self):
+    #     while self.state == "LEADER" and self.lease_acquired:
+    #         self.renew_lease()
+    #         time.sleep(self.lease_timeout / 2)
 
     def append_noop_entry(self):
         entry = raft_pb2.Entry(
@@ -235,6 +238,8 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
             leaseDuration=self.lease_timeout,
         )
 
+        active_nodes = 1
+
         for node_id in range(self.num_nodes):
             if node_id != self.node_id:
                 try:
@@ -242,7 +247,10 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     response = stub.AppendEntries(args)
                     print("Sending from send_heartbeat, node", self.node_id)
                     if response.success:
-                        self.match_index[node_id] = args.prevLogIndex + len(args.entries)
+                        active_nodes += 1
+                        self.match_index[node_id] = args.prevLogIndex + len(
+                            args.entries
+                        )
                         self.next_index[node_id] = self.match_index[node_id] + 1
                     else:
                         self.next_index[node_id] -= 1
@@ -251,6 +259,17 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                         f"send_heartbeat Error occurred while sending RPC to Node {node_id}.\n"
                     )
                     self.dump_file.flush()
+
+        if active_nodes < self.num_nodes // 2:
+            print("Leader lost majority of nodes")
+            self.dump_file.write(
+                f"Leader {self.node_id} lost majority of nodes. Stepping Down.\n"
+            )
+            self.dump_file.flush()
+            self.step_down()
+
+        else:
+            self.restart_lease_renewal_timer()
 
         # self.check_commit_length()
         self.restart_heartbeat_timer()
@@ -609,8 +628,8 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         self.lease_acquired = False
         self.persist_metadata()
         self.restart_election_timer()
-        if self.lease_renewal_thread:
-            self.lease_renewal_thread.join()
+        # if self.lease_renewal_thread:
+        #     self.lease_renewal_thread.join()
 
     def renew_lease(self):
         # if self.state == "LEADER" and self.lease_acquired:
@@ -647,5 +666,11 @@ if __name__ == "__main__":
         server.wait_for_termination()
 
     except KeyboardInterrupt:
+        raft_node_instance.step_down()
+        raft_node_instance.election_timer.cancel()
+        raft_node_instance.heartbeat_timer.cancel()
+        raft_node_instance.lease_renewal_timer.cancel()
+        # if raft_node_instance.lease_renewal_thread:
+        #     raft_node_instance.lease_renewal_thread.join()
         print("Shutting down server...")
         server.stop(None)

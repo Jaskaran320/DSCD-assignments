@@ -1,6 +1,7 @@
 import grpc
 import raft_pb2
 import raft_pb2_grpc
+import random
 
 
 class RaftClient:
@@ -15,10 +16,12 @@ class RaftClient:
             for address, channel in self.channels.items()
         }
 
-    def send_request(self, request):
+    def send_request(self, request, server_address):
         if self.leader_id == "None":
             try:
-                response = self.stubs['localhost:50051'].ServeClient(raft_pb2.ServeClientArgs(request=request))
+                response = self.stubs[self.node_addresses[server_address]].ServeClient(
+                    raft_pb2.ServeClientArgs(request=request)
+                )
                 if response.success:
                     self.leader_id = response.leaderID
                     print(f"1-Leader ID: {self.leader_id}")
@@ -26,22 +29,23 @@ class RaftClient:
                 else:
                     print(f"2-Leader ID: {response.leaderID}")
                     while response.leaderID == "None":
-                        response = self.stubs['localhost:50051'].ServeClient(
-                            raft_pb2.ServeClientArgs(request=request)
-                        )
+                        response = self.stubs[
+                            self.node_addresses[server_address]
+                        ].ServeClient(raft_pb2.ServeClientArgs(request=request))
                     self.leader_id = response.leaderID
-                    response = self.stubs[self.node_addresses[int(self.leader_id)]].ServeClient(
-                        raft_pb2.ServeClientArgs(request=request)
-                    )
+                    response = self.stubs[
+                        self.node_addresses[int(self.leader_id)]
+                    ].ServeClient(raft_pb2.ServeClientArgs(request=request))
                     return response.data
             except grpc.RpcError as e:
+                index = random.randint(0, 4)
                 print(f"RPC error: {e}")
-        
+                self.send_request(request, self.node_addresses[index])
         else:
             try:
-                response = self.stubs[self.node_addresses[int(self.leader_id)]].ServeClient(
-                    raft_pb2.ServeClientArgs(request=request)
-                )
+                response = self.stubs[
+                    self.node_addresses[int(self.leader_id)]
+                ].ServeClient(raft_pb2.ServeClientArgs(request=request))
                 if response.success:
                     print(f"3-Leader ID: {response.leaderID}")
                     self.leader_id = response.leaderID
@@ -50,24 +54,34 @@ class RaftClient:
                     print(f"4-Leader ID: {response.leaderID}")
                     self.leader_id = response.leaderID
                     if self.leader_id != "None":
-                        response = self.stubs[self.node_addresses[int(self.leader_id)]].ServeClient(
-                            raft_pb2.ServeClientArgs(request=request)
-                        )
+                        response = self.stubs[
+                            self.node_addresses[int(self.leader_id)]
+                        ].ServeClient(raft_pb2.ServeClientArgs(request=request))
                         return response.data
             except grpc.RpcError as e:
+                index = random.randint(0, 4)
                 print(f"RPC error: {e}")
-        
+                self.send_request(request, self.node_addresses[index])
+
         return ""
 
     def get(self, key):
-        return self.send_request(f"GET {key}")
+        return self.send_request(f"GET {key}", 0)
 
     def set(self, key, value):
-        return self.send_request(f"SET {key} {value}")
-    
+        return self.send_request(f"SET {key} {value}", 0)
+
 
 if __name__ == "__main__":
-    client = RaftClient(["localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055"])
+    client = RaftClient(
+        [
+            "localhost:50051",
+            "localhost:50052",
+            "localhost:50053",
+            "localhost:50054",
+            "localhost:50055",
+        ]
+    )
     while True:
         print("1. Get")
         print("2. Set")
