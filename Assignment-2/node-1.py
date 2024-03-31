@@ -28,6 +28,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         self.lease_acquired = False
         self.lease_start_time = 0
         self.old_leader_lease_end_time = 0
+        self.lease_renewal_thread = None
 
         self.create_persistent_storage()
         self.load_persistent_state()
@@ -88,7 +89,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
 
     def restart_election_timer(self):
         self.election_timer.cancel()
-        self.election_timeout = random.uniform(5, 10)
+        # self.election_timeout = random.uniform(5, 10)
         self.start_election_timer()
 
     def restart_heartbeat_timer(self):
@@ -183,8 +184,22 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         self.dump_file.flush()
         while time.time() < self.old_leader_lease_end_time:
             time.sleep(0.1)
-        if flag:
-            self.append_noop_entry()
+
+        self.start_lease_renewal_thread()
+
+        # if flag:
+        #     self.append_noop_entry()
+
+    def start_lease_renewal_thread(self):
+        self.lease_renewal_thread = threading.Thread(
+            target=self.renew_lease_periodically
+        )
+        self.lease_renewal_thread.start()
+
+    def renew_lease_periodically(self):
+        while self.state == "LEADER" and self.lease_acquired:
+            self.renew_lease()
+            time.sleep(self.lease_timeout / 2)
 
     def append_noop_entry(self):
         entry = raft_pb2.Entry(
@@ -202,12 +217,14 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
             f"Leader {self.node_id} sending heartbeat & Renewing Lease\n"
         )
         self.dump_file.flush()
-        self.acquire_lease()
+        # self.acquire_lease()
         self.restart_lease_renewal_timer()
 
         entry = raft_pb2.Entry(
             operation="NO-OP", key="", value="", term=self.current_term
         )
+        self.log.append(("NO-OP", "", "", self.current_term))
+        self.persist_log(entry)
         args = raft_pb2.AppendEntriesArgs(
             term=self.current_term,
             leaderID=str(self.node_id),
@@ -241,9 +258,13 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
     def send_append_entries(self, entry):
         # prev_log_index = len(self.log) - 1
         # prev_log_term = self.log[-1][3] if self.log else 0
-        if entry.operation != "SET" and (not self.log or self.log[-1] != (entry.operation, entry.key, entry.value, entry.term)):
-            self.log.append((entry.operation, entry.key, entry.value, entry.term))
-            self.persist_log(entry)
+        # if entry.operation != "SET" and (
+        #     not self.log
+        #     or self.log[-1] != (entry.operation, entry.key, entry.value, entry.term)
+        # ):
+
+        self.log.append((entry.operation, entry.key, entry.value, entry.term))
+        self.persist_log(entry)
 
         # time.sleep(self.heartbeat_timeout)
         # self.restart_heartbeat_timer()
@@ -414,7 +435,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     operation="SET", key=key, value=value, term=self.current_term
                 )
                 self.log.append(("SET", key, value, self.current_term))
-                self.persist_log(entry)
+                # self.persist_log(entry)
                 self.send_append_entries(entry)
                 return raft_pb2.ServeClientReply(
                     data="", leaderID=str(self.node_id), success=True
@@ -449,6 +470,8 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
             self.leader_id = request.leaderID
             self.persist_metadata()
 
+            self.old_leader_lease_end_time = time.time() + request.leaseDuration
+
             prev_log_index = request.prevLogIndex
             prev_log_term = request.prevLogTerm
             entries = request.entries
@@ -474,8 +497,13 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
             # elif self.log[prev_log_index][3] != prev_log_term:
             #     self.log = self.log[:prev_log_index]
             for entry in entries:
-                if entry.operation != "SET" and self.log and self.log[-1] == (entry.operation, entry.key, entry.value, entry.term):
-                    continue
+                # if (
+                #     entry.operation != "SET"
+                #     and self.log
+                #     and self.log[-1]
+                #     == (entry.operation, entry.key, entry.value, entry.term)
+                # ):
+                #     continue
                 self.log.append((entry.operation, entry.key, entry.value, entry.term))
                 self.persist_log(entry)
 
@@ -581,21 +609,29 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         self.lease_acquired = False
         self.persist_metadata()
         self.restart_election_timer()
+        if self.lease_renewal_thread:
+            self.lease_renewal_thread.join()
 
     def renew_lease(self):
+        # if self.state == "LEADER" and self.lease_acquired:
+        #     if time.time() > self.lease_start_time + self.lease_timeout:
+        #         self.dump_file.write(
+        #             f"Leader {self.node_id} lease renewal failed. Stepping Down.\n"
+        #         )
+        #         self.dump_file.flush()
+        #         self.step_down()
+        #     else:
+        #         self.lease_start_time = time.time()
+        #         self.old_leader_lease_end_time = (
+        #             self.lease_start_time + self.lease_timeout
+        #         )
+        #         self.restart_lease_renewal_timer()
+
         if self.state == "LEADER" and self.lease_acquired:
-            if time.time() > self.lease_start_time + self.lease_timeout:
-                self.dump_file.write(
-                    f"Leader {self.node_id} lease renewal failed. Stepping Down.\n"
-                )
-                self.dump_file.flush()
-                self.step_down()
-            else:
-                self.lease_start_time = time.time()
-                self.old_leader_lease_end_time = (
-                    self.lease_start_time + self.lease_timeout
-                )
-                self.restart_lease_renewal_timer()
+            # self.lease_start_time = time.time()
+            # self.old_leader_lease_end_time = self.lease_start_time + self.lease_timeout
+            self.persist_metadata()
+            self.send_heartbeat()
 
 
 if __name__ == "__main__":
