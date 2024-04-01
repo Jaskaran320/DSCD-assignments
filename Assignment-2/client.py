@@ -38,18 +38,20 @@ class RaftClient:
                     ].ServeClient(raft_pb2.ServeClientArgs(request=request))
                     return response.data
             except grpc.RpcError as e:
-                print(e)
-                return "Failed"
+                index = random.randint(0, 4)
+                print(f"RPC error: {e}")
+                print(index)
+                self.send_request(request, index,flag=1)
         else:
             try:
-                # if flag == 1:
-                #     response = self.stubs[
-                #         self.node_addresses[int(server_address)]
-                #     ].ServeClient(raft_pb2.ServeClientArgs(request=request))
-                # else:
-                response = self.stubs[
-                    self.node_addresses[int(self.leader_id)]
-                ].ServeClient(raft_pb2.ServeClientArgs(request=request))
+                if flag == 1:
+                    response = self.stubs[
+                        self.node_addresses[int(server_address)]
+                    ].ServeClient(raft_pb2.ServeClientArgs(request=request))
+                else:
+                    response = self.stubs[
+                        self.node_addresses[int(self.leader_id)]
+                    ].ServeClient(raft_pb2.ServeClientArgs(request=request))
                 if response.success:
                     print(f"3-Leader ID: {response.leaderID}")
                     self.leader_id = response.leaderID
@@ -63,23 +65,19 @@ class RaftClient:
                         ].ServeClient(raft_pb2.ServeClientArgs(request=request))
                         return response.data
             except grpc.RpcError as e:
-                print(e)
-                return "Failed"
+                index = random.randint(0, 4)
+                print(f"RPC error: {e}")
+                self.send_request(request,index,flag=1)
 
         return ""
 
     def get(self, key):
-        status=self.send_request(f"GET {key}", 0,flag=0)
-        if status == "Failed":
-            self.send_request(f"SET {key} {value}", random.randint(1,4),flag=1)
-        else:
-            return status
+        return self.send_request(f"GET {key}", 0,flag=0)
+
     def set(self, key, value):
-        status= self.send_request(f"SET {key} {value}", 0,flag=0)
-        if status == "Failed":
-            self.send_request(f"SET {key} {value}", random.randint(1,4),flag=1)
-        else:
-            return status
+        return self.send_request(f"SET {key} {value}", 0,flag=0)
+
+
 if __name__ == "__main__":
     client = RaftClient(
         [
