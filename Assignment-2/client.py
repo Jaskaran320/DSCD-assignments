@@ -6,6 +6,7 @@ import random
 
 class RaftClient:
     def __init__(self, node_addresses):
+        self.index = 0
         self.node_addresses = node_addresses
         self.leader_id = "None"
         self.channels = {
@@ -16,12 +17,13 @@ class RaftClient:
             for address, channel in self.channels.items()
         }
 
-    def send_request(self, request, server_address,flag):
+    def send_request(self, request, server_address, flag=0):
         if self.leader_id == "None":
             try:
-                response = self.stubs[self.node_addresses[(server_address)]].ServeClient(
-                    raft_pb2.ServeClientArgs(request=request)
-                )
+                response = self.stubs[
+                    self.node_addresses[server_address]
+                ].ServeClient(raft_pb2.ServeClientArgs(request=request))
+                print(f"response: {response}")
                 if response.success:
                     self.leader_id = response.leaderID
                     print(f"1-Leader ID: {self.leader_id}")
@@ -38,24 +40,39 @@ class RaftClient:
                     ].ServeClient(raft_pb2.ServeClientArgs(request=request))
                     return response.data
             except grpc.RpcError as e:
-                index = random.randint(0, 4)
+                self.index += 1
+                self.index = self.index % len(self.node_addresses)
                 print(f"RPC error: {e}")
-                print(index)
-                self.send_request(request, index,flag=1)
+                print(self.index)
+                self.send_request(request, self.index, flag=1)
         else:
             try:
-                if flag == 1:
+                if flag:
                     response = self.stubs[
-                        self.node_addresses[int(server_address)]
+                        self.node_addresses[server_address]
                     ].ServeClient(raft_pb2.ServeClientArgs(request=request))
                 else:
                     response = self.stubs[
                         self.node_addresses[int(self.leader_id)]
                     ].ServeClient(raft_pb2.ServeClientArgs(request=request))
+                print(f"response: {response}")
+                print(f"success: {response.success}")
+
                 if response.success:
                     print(f"3-Leader ID: {response.leaderID}")
                     self.leader_id = response.leaderID
                     return response.data
+                
+                # elif len(response) == 1:
+                #     while len(response) == 1:
+                #         response = self.stubs[
+                #             self.node_addresses[int(self.leader_id)]
+                #         ].ServeClient(raft_pb2.ServeClientArgs(request=request))
+                #     if response.success:
+                #         print(f"4-Leader ID: {response.leaderID}")
+                #         self.leader_id = response.leaderID
+                #         return response.data
+                    
                 else:
                     print(f"4-Leader ID: {response.leaderID}")
                     self.leader_id = response.leaderID
@@ -65,27 +82,29 @@ class RaftClient:
                         ].ServeClient(raft_pb2.ServeClientArgs(request=request))
                         return response.data
             except grpc.RpcError as e:
-                index = random.randint(0, 4)
+                self.index += 1
+                self.index = self.index % len(self.node_addresses)
                 print(f"RPC error: {e}")
-                self.send_request(request,index,flag=1)
+                # print(self.index)
+                self.send_request(request, self.index, flag=1)
 
         return ""
 
     def get(self, key):
-        return self.send_request(f"GET {key}", 0,flag=0)
+        return self.send_request(f"GET {key}", 0)
 
     def set(self, key, value):
-        return self.send_request(f"SET {key} {value}", 0,flag=0)
+        return self.send_request(f"SET {key} {value}", 0)
 
 
 if __name__ == "__main__":
     client = RaftClient(
         [
+            "localhost:50050",
             "localhost:50051",
             "localhost:50052",
             "localhost:50053",
             "localhost:50054",
-            "localhost:50055",
         ]
     )
     while True:

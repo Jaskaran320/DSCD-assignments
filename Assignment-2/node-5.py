@@ -22,7 +22,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         self.leader_id = None
         self.next_index = defaultdict(lambda: 0)
         self.match_index = defaultdict(lambda: 0)
-        self.election_timeout =  random.uniform(5, 10)
+        self.election_timeout = random.uniform(5, 10)
         self.heartbeat_timeout = 1
         self.lease_timeout = 4
         self.lease_acquired = False
@@ -31,7 +31,6 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         self.lease_renewal_thread = None
 
         self.other_nodes_status = [True for _ in range(self.num_nodes)]
-
 
         self.create_persistent_storage()
         self.load_persistent_state()
@@ -154,17 +153,17 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                         # self.election_timer.cancel()
                         # self.restart_election_timer()
                         self.old_leader_lease_end_time = max(
-                            self.old_leader_lease_end_time, response.oldLeaderLeaseDuration
+                            self.old_leader_lease_end_time,
+                            response.oldLeaderLeaseDuration,
                         )
                         self.other_nodes_status[node_id] = True
-                
+
                 except grpc.RpcError:
                     self.dump_file.write(
                         f"send_request_vote Error occurred while sending RPC to Node {node_id}.\n"
                     )
                     self.dump_file.flush()
                     self.other_nodes_status[node_id] = False
-
 
         if self.votes > self.num_nodes // 2:
             self.become_leader()
@@ -250,7 +249,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
             leaseDuration=self.lease_timeout,
         )
 
-        active_nodes = 1
+        active_nodes = 0
 
         for node_id in range(self.num_nodes):
             if node_id != self.node_id:
@@ -258,9 +257,13 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                 if self.other_nodes_status[node_id] == False:
                     entries = [
                         raft_pb2.Entry(
-                            operation=entry[0], key=entry[1], value=entry[2], term=entry[3]
+                            operation=entry[0],
+                            key=entry[1],
+                            value=entry[2],
+                            term=entry[3],
                         )
-                        for entry in self.log]
+                        for entry in self.log
+                    ]
 
                     args = raft_pb2.AppendEntriesArgs(
                         term=self.current_term,
@@ -293,6 +296,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     )
                     self.dump_file.flush()
                     self.other_nodes_status[node_id] = False
+        print("Active Nodes: ", active_nodes)
 
         if active_nodes < self.num_nodes // 2:
             print("Leader lost majority of nodes")
@@ -382,7 +386,11 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     self.dump_file.flush()
                     self.other_nodes_status[node_id] = False
 
-        if self.log[-1]== self.log[-2] and self.log[-1][0] == "SET" and self.log[-2][0] == "SET":
+        if (
+            self.log[-1] == self.log[-2]
+            and self.log[-1][0] == "SET"
+            and self.log[-2][0] == "SET"
+        ):
             self.log.pop()
         self.check_commit_length(entry)
         # self.commit_entry(entry)
@@ -419,9 +427,9 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
 
         if committed_entries:
             new_commit_length = min(committed_entries)
-            print(f"Old commit length: {self.commit_length}")
-            print(f"New commit length: {new_commit_length}")
-            print(f"Log: {self.log}")
+            # print(f"Old commit length: {self.commit_length}")
+            # print(f"New commit length: {new_commit_length}")
+            # print(f"Log: {self.log}")
 
             if (
                 new_commit_length > self.commit_length
@@ -472,6 +480,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     f"Node {self.node_id} (leader) received a GET {key} request.\n"
                 )
                 self.dump_file.flush()
+                print("Value: ", value)
                 return raft_pb2.ServeClientReply(
                     data=value, leaderID=str(self.node_id), success=True
                 )
@@ -496,9 +505,16 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                 )
                 self.log.append(("SET", key, value, self.current_term))
                 # self.persist_log(entry)
+
+                # self.sending_thread = threading.Thread(
+                #     target=self.send_append_entries, args=(entry,)
+                # )
+                # self.sending_thread.start()
                 self.send_append_entries(entry)
+                
+                print("sending from leader that it received set request")
                 return raft_pb2.ServeClientReply(
-                    data="", leaderID=str(self.node_id), success=True
+                    data="empty", leaderID=str(self.node_id), success=True
                 )
             else:
                 self.dump_file.write(
@@ -524,7 +540,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
 
     def AppendEntries(self, request, context):
         self.restart_election_timer()
-        if self.state == "FOLLOWER" and self.current_term <= request.term:
+        if (self.state == "FOLLOWER" or self.state == "CANDIDATE") and self.current_term <= request.term:
             self.current_term = request.term
             self.voted_for = None
             self.leader_id = request.leaderID
@@ -536,21 +552,22 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
             prev_log_term = request.prevLogTerm
             entries = request.entries
 
-            if len(entries)>2:                
-                self.log_file= open(os.path.join(f"logs/logs_node_{self.node_id}", "logs.txt"), "w")
-                self.log_file.close()
-                self.log_file= open(os.path.join(f"logs/logs_node_{self.node_id}", "logs.txt"), "a+")
-                self.log=[]
+            if len(entries) > 2:
+                self.log_file.seek(0)
+                self.log_file.truncate()
+                self.log.clear()
 
                 for entry in entries:
-                # if (
-                #     entry.operation != "SET"
-                #     and self.log
-                #     and self.log[-1]
-                #     == (entry.operation, entry.key, entry.value, entry.term)
-                # ):
-                #     continue
-                    self.log.append((entry.operation, entry.key, entry.value, entry.term))
+                    # if (
+                    #     entry.operation != "SET"
+                    #     and self.log
+                    #     and self.log[-1]
+                    #     == (entry.operation, entry.key, entry.value, entry.term)
+                    # ):
+                    #     continue
+                    self.log.append(
+                        (entry.operation, entry.key, entry.value, entry.term)
+                    )
                     self.persist_log(entry)
                 return raft_pb2.AppendEntriesReply(term=self.current_term, success=True)
 
@@ -609,6 +626,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                 # )
                 # self.dump_file.flush()
 
+            self.state = "FOLLOWER"
             if self.state == "FOLLOWER" and self.current_term <= request.term:
                 self.match_index[self.node_id] = prev_log_index + len(entries)
 
@@ -627,7 +645,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
 
         if candidate_term <= self.current_term:
             self.dump_file.write(
-                f"Vote denied for Node {candidate_id} in term {candidate_term} by Node {self.node_id}.\n"
+                f"Vote denied for Node {candidate_id} in term {candidate_term} by Node {self.node_id} 1.\n"
             )
             self.dump_file.flush()
             return raft_pb2.RequestVoteReply(
@@ -715,8 +733,9 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
 
 if __name__ == "__main__":
     try:
+        node_id = int(input("Enter node ID: "))
         server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-        raft_node_instance = RaftNode(4, 5)
+        raft_node_instance = RaftNode(node_id, 5)
         raft_pb2_grpc.add_RaftNodeServicer_to_server(raft_node_instance, server)
         server.add_insecure_port("[::]:50055")
         server.start()
