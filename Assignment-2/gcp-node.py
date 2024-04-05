@@ -285,8 +285,10 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     )
                     self.dump_file.flush()
                     self.other_nodes_status[node_id] = False
+
         print("Active Nodes: ", active_nodes)
-        if active_nodes < self.num_nodes // 2:
+
+        if active_nodes <= 1:
             print("Leader lost majority of nodes")
             self.dump_file.write(
                 f"Leader {self.node_id} lost majority of nodes. Stepping Down.\n"

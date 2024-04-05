@@ -30,7 +30,6 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         self.old_leader_lease_end_time = 0
         self.lease_renewal_thread = None
         self.other_nodes_status = [True for _ in range(self.num_nodes)]
-        print("ELECTION",self.election_timeout)
         self.create_persistent_storage()
         self.load_persistent_state()
         self.start_election_timer()
@@ -313,7 +312,8 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     self.dump_file.flush()
                     self.other_nodes_status[node_id] = False
         print("Active Nodes: ", active_nodes)
-        if active_nodes < self.num_nodes // 2:
+
+        if active_nodes <= 1:
             print("Leader lost majority of nodes")
             self.dump_file.write(
                 f"Leader {self.node_id} lost majority of nodes. Stepping Down.\n"

@@ -37,7 +37,9 @@ class RaftClient:
                     ].ServeClient(raft_pb2.ServeClientArgs(request=request))
                     return response.data
             except grpc.RpcError as e:
-                self.index = (self.index + 1) % len(self.node_addresses)
+                self.index = (self.index + 1) #% len(self.node_addresses)
+                if self.index > 4:
+                    return
                 self.send_request(request, self.index, flag=1)
         else:
             try:
@@ -62,7 +64,9 @@ class RaftClient:
                         ].ServeClient(raft_pb2.ServeClientArgs(request=request))
                         return response.data
             except grpc.RpcError as e:
-                self.index = (self.index + 1) % len(self.node_addresses)
+                self.index = (self.index + 1)
+                if self.index > 4:
+                    return
                 self.send_request(request, self.index, flag=1)
 
         return ""
