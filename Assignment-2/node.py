@@ -30,7 +30,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         self.old_leader_lease_end_time = 0
         self.lease_renewal_thread = None
         self.other_nodes_status = [True for _ in range(self.num_nodes)]
-        
+        print("ELECTION",self.election_timeout)
         self.create_persistent_storage()
         self.load_persistent_state()
         self.start_election_timer()
@@ -40,7 +40,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
     def create_persistent_storage(self):
         if self.node_id == 0: self.election_timeout = 5
         dir_name = f"logs/logs_node_{self.node_id}"
-        # if self.node_id == 1: self.election_timeout = 6
+        if self.node_id == 1: self.election_timeout = 6
         if not os.path.exists(dir_name):
             os.makedirs(dir_name)
         self.log_file = open(os.path.join(dir_name, "logs.txt"), "a+")
@@ -48,23 +48,23 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         self.dump_file = open(os.path.join(dir_name, "dump.txt"), "a+")
 
     def load_persistent_state(self):
-        # if self.node_id == 2: self.election_timeout = 7
+        if self.node_id == 2: self.election_timeout = 7
         self.log_file.seek(0)
         self.metadata_file.seek(0)
-        # if self.node_id == 3: self.election_timeout = 8
+        if self.node_id == 3: self.election_timeout = 8
         for line in self.log_file:
             entry = line.strip().split()
             if entry[0] == "SET":
                 self.log.append((entry[0], entry[1], entry[2], int(entry[3])))
             elif entry[0] == "NO-OP":
                 self.log.append((entry[0], "", "", int(entry[1])))
-        # if self.node_id == 4: self.election_timeout = 9
+        if self.node_id == 4: self.election_timeout = 9
         for line in self.metadata_file:
             metadata = line.strip().split()
             self.current_term = int(metadata[0])
             self.voted_for = metadata[1]
             self.commit_length = int(metadata[2])
-
+        # if self.node==1: self.election_timeout = 6
     def persist_log(self, entry):
         self.log_file.write(
             f"{entry.operation} {entry.key} {entry.value} {entry.term}\n"
@@ -257,8 +257,8 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
 
         for node_id in range(self.num_nodes):
             if node_id != self.node_id:
-
-                if self.other_nodes_status[node_id] == False:
+                print("Status of ",node_id,"is",not self.other_nodes_status[node_id])
+                if not self.other_nodes_status[node_id] :
                     entries = [
                         raft_pb2.Entry(
                             operation=entry[0],
@@ -267,7 +267,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                             term=entry[3],
                         )
                         for entry in self.log
-                    ]
+                        ]
 
                     args = raft_pb2.AppendEntriesArgs(
                         term=self.current_term,
@@ -278,7 +278,19 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                         leaderCommit=self.commit_length,
                         leaseDuration=self.lease_timeout,
                     )
+                else:
+                    args = raft_pb2.AppendEntriesArgs(
+                    term=self.current_term,
+                    leaderID=str(self.node_id),
+                    prevLogIndex=len(self.log) - 1,
+                    prevLogTerm=self.log[-1][3] if self.log else 0,
+                    entries=[entry],
+                    leaderCommit=self.commit_length,
+                    leaseDuration=self.lease_timeout,
+                    )
+
                 try:
+                    print("Checking if this works at all",len(args.entries))
                     stub = self.get_stub(node_id)
                     response = stub.AppendEntries(args)
                     print("Sending from send_heartbeat, node", self.node_id)
@@ -364,8 +376,8 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     # )
                     # self.log_file.flush()
                     if response.success:
-                        self.match_index[node_id] = prev_log_index + len(args.entries)
-                        self.next_index[node_id] = self.match_index[node_id] + 1
+                        # self.match_index[node_id] = prev_log_index + len(args.entries)
+                        # self.next_index[node_id] = self.match_index[node_id] + 1
                         # self.check_commit_length()
                         self.commit_entry(entry)
                         self.dump_file.write(
@@ -388,11 +400,22 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     )
                     self.dump_file.flush()
                     self.other_nodes_status[node_id] = False
+        # repeated_indexes=[]
+        # for i in range(0,len(self.log)-1):
 
+        #     if (self.log[i+1] == self.log[i]
+        #         and self.log[i+1][0] == "SET"
+        #         and self.log[i][0] == "SET"):
+        #         repeated_indexes.append(i+1)
+        # # concatenate subarrays from log without repeated indexes
+        # new_log = [self.log[i] for i in range(len(self.log)) if i not in repeated_indexes]
+        # self.log = new_log
         if (self.log[-1] == self.log[-2]
             and self.log[-1][0] == "SET"
             and self.log[-2][0] == "SET"):
             self.log.pop()
+
+
             # self.persist_log(entry)
         self.check_commit_length(entry)
         # self.commit_entry(entry)
@@ -637,8 +660,8 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                 # self.dump_file.flush()
 
             self.state = "FOLLOWER"
-            if self.state == "FOLLOWER" and self.current_term <= request.term:
-                self.match_index[self.node_id] = prev_log_index + len(entries)
+            # if self.state == "FOLLOWER" and self.current_term <= request.term:
+            #     self.match_index[self.node_id] = prev_log_index + len(entries)
 
             return raft_pb2.AppendEntriesReply(term=self.current_term, success=True)
         else:
@@ -744,8 +767,8 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
 if __name__ == "__main__":
     try:
         node_id = int(input("Enter node ID: "))
-        if node_id == 0 and os.path.exists("logs"):
-            shutil.rmtree("logs")
+        # if node_id == 0 and os.path.exists("logs"):
+        #     shutil.rmtree("logs")
         server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
         raft_node_instance = RaftNode(node_id, 5)
         raft_pb2_grpc.add_RaftNodeServicer_to_server(raft_node_instance, server)
