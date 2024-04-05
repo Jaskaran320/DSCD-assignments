@@ -23,13 +23,10 @@ class RaftClient:
                 response = self.stubs[
                     self.node_addresses[server_address]
                 ].ServeClient(raft_pb2.ServeClientArgs(request=request))
-                print(f"response: {response}")
                 if response.success:
                     self.leader_id = response.leaderID
-                    print(f"1-Leader ID: {self.leader_id}")
                     return response.data
                 else:
-                    print(f"2-Leader ID: {response.leaderID}")
                     while response.leaderID == "None":
                         response = self.stubs[
                             self.node_addresses[server_address]
@@ -41,8 +38,6 @@ class RaftClient:
                     return response.data
             except grpc.RpcError as e:
                 self.index = (self.index + 1) % len(self.node_addresses)
-                print(f"RPC error: {e}")
-                print(self.index)
                 self.send_request(request, self.index, flag=1)
         else:
             try:
@@ -54,26 +49,12 @@ class RaftClient:
                     response = self.stubs[
                         self.node_addresses[int(self.leader_id)]
                     ].ServeClient(raft_pb2.ServeClientArgs(request=request))
-                print(f"response: {response}")
-                print(f"success: {response.success}")
 
                 if response.success:
-                    print(f"3-Leader ID: {response.leaderID}")
                     self.leader_id = response.leaderID
                     return response.data
-                
-                # elif len(response) == 1:
-                #     while len(response) == 1:
-                #         response = self.stubs[
-                #             self.node_addresses[int(self.leader_id)]
-                #         ].ServeClient(raft_pb2.ServeClientArgs(request=request))
-                #     if response.success:
-                #         print(f"4-Leader ID: {response.leaderID}")
-                #         self.leader_id = response.leaderID
-                #         return response.data
                     
                 else:
-                    print(f"4-Leader ID: {response.leaderID}")
                     self.leader_id = response.leaderID
                     if self.leader_id != "None":
                         response = self.stubs[
@@ -82,8 +63,6 @@ class RaftClient:
                         return response.data
             except grpc.RpcError as e:
                 self.index = (self.index + 1) % len(self.node_addresses)
-                print(f"RPC error: {e}")
-                # print(self.index)
                 self.send_request(request, self.index, flag=1)
 
         return ""
@@ -96,15 +75,13 @@ class RaftClient:
 
 
 if __name__ == "__main__":
-    client = RaftClient(
-        [
-            "localhost:50050",
-            "localhost:50051",
-            "localhost:50052",
-            "localhost:50053",
-            "localhost:50054",
-        ]
-    )
+    client = RaftClient([
+            "10.190.0.8",
+            "10.190.0.9",
+            "10.190.0.10",
+            "10.190.0.11",
+            "10.190.0.12",
+        ])
     while True:
         print("1. Get")
         print("2. Set")
