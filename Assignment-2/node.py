@@ -419,25 +419,26 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
     #         self.commit_length = new_commit_length
 
     def check_commit_length(self, entry):
-        # print(f"Match Index: {self.match_index}")
+        print(f"Match Index: {self.match_index}")
 
-        match_indices = list(self.match_index.values()) + [len(self.log)]
+        match_indices = list(self.match_index.values()) #+ [len(self.log)]
         match_indices.sort(reverse=True)
 
-        committed_entries = match_indices[: self.num_nodes // 2 + 1]
-        # print(f"Committed Entries: {committed_entries}")
+        committed_entries = match_indices#[: self.num_nodes // 2 + 1]
+        print(f"Committed Entries: {committed_entries}")
 
         if committed_entries:
             new_commit_length = min(committed_entries)
-            # print(f"Old commit length: {self.commit_length}")
-            # print(f"New commit length: {new_commit_length}")
-            # print(f"Log: {self.log}")
+            print(f"Old commit length: {self.commit_length}")
+            print(f"New commit length: {new_commit_length}")
+            print(f"Log: {self.log}")
+            print(f"Log Length: {len(self.log)}")
 
             if (new_commit_length > self.commit_length
                 and self.log[new_commit_length - 1][3] == self.current_term):
                 print("test1")
-                for i in range(self.commit_length + 1, new_commit_length + 1):
-                    entry = self.log[i - 1]
+                for i in range(self.commit_length, new_commit_length):
+                    entry = self.log[i]
                     self.commit_entry(entry, log=True)
                 self.commit_length = new_commit_length
                 print("test2")
@@ -743,6 +744,8 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
 if __name__ == "__main__":
     try:
         node_id = int(input("Enter node ID: "))
+        if node_id == 0 and os.path.exists("logs"):
+            shutil.rmtree("logs")
         server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
         raft_node_instance = RaftNode(node_id, 5)
         raft_pb2_grpc.add_RaftNodeServicer_to_server(raft_node_instance, server)
