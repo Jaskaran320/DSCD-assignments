@@ -70,6 +70,15 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         )
         self.log_file.flush()
 
+    def persist_log_file(self, log):
+        self.log_file.seek(0)
+        self.log_file.truncate()
+        for entry in log:
+            self.log_file.write(
+                f"{entry[0]} {entry[1]} {entry[2]} {entry[3]}\n"
+            )
+        self.log_file.flush()
+
     def persist_metadata(self):
         self.metadata_file.write(
             f"{self.current_term} {self.voted_for} {self.commit_length}\n"
@@ -242,31 +251,32 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         )
         self.log.append(("NO-OP", "", "", self.current_term))
         self.persist_log(entry)
-        args = raft_pb2.AppendEntriesArgs(
-            term=self.current_term,
-            leaderID=str(self.node_id),
-            prevLogIndex=len(self.log) - 1,
-            prevLogTerm=self.log[-1][3] if self.log else 0,
-            entries=[entry],
-            leaderCommit=self.commit_length,
-            leaseDuration=self.lease_timeout,
-        )
+
+        # args = raft_pb2.AppendEntriesArgs(
+        #     term=self.current_term,
+        #     leaderID=str(self.node_id),
+        #     prevLogIndex=len(self.log) - 1,
+        #     prevLogTerm=self.log[-1][3] if self.log else 0,
+        #     entries=[entry],
+        #     leaderCommit=self.commit_length,
+        #     leaseDuration=self.lease_timeout,
+        # )
 
         active_nodes = 0
 
         for node_id in range(self.num_nodes):
             if node_id != self.node_id:
                 # print("Status of ",node_id,"is",not self.other_nodes_status[node_id])
+                entries = [
+                    raft_pb2.Entry(
+                        operation=entry[0],
+                        key=entry[1],
+                        value=entry[2],
+                        term=entry[3],
+                    )
+                    for entry in self.log
+                    ]
                 if not self.other_nodes_status[node_id] :
-                    entries = [
-                        raft_pb2.Entry(
-                            operation=entry[0],
-                            key=entry[1],
-                            value=entry[2],
-                            term=entry[3],
-                        )
-                        for entry in self.log
-                        ]
 
                     args = raft_pb2.AppendEntriesArgs(
                         term=self.current_term,
@@ -283,7 +293,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     leaderID=str(self.node_id),
                     prevLogIndex=len(self.log) - 1,
                     prevLogTerm=self.log[-1][3] if self.log else 0,
-                    entries=[entry],
+                    entries=entries, #[entry],
                     leaderCommit=self.commit_length,
                     leaseDuration=self.lease_timeout,
                     )
@@ -298,8 +308,8 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                         self.match_index[node_id] = args.prevLogIndex + len(
                             args.entries
                         )
-                        # self.next_index[node_id] = self.match_index[node_id] + 1
-                        self.next_index[node_id] = len(self.log) + 1
+                        self.next_index[node_id] = self.match_index[node_id] + 1
+                        # self.next_index[node_id] = len(self.log) + 1
 
                         self.other_nodes_status[node_id] = True
 
@@ -338,7 +348,21 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         # ):
 
         self.log.append((entry.operation, entry.key, entry.value, entry.term))
-        self.persist_log(entry)
+
+        new_list = []
+        set_occurrences = {}
+
+        for i in range(len(self.log)):
+            if self.log[i][0] == "SET":
+                key = self.log[i][1]
+                if key in set_occurrences and i - set_occurrences[key] <= 3:
+                    continue
+                set_occurrences[key] = i
+            new_list.append(self.log[i])
+
+        self.log = new_list
+        
+        self.persist_log_file(self.log)
 
         # time.sleep(self.heartbeat_timeout)
         # self.restart_heartbeat_timer()
@@ -358,7 +382,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     raft_pb2.Entry(
                         operation=entry[0], key=entry[1], value=entry[2], term=entry[3]
                     )
-                    for entry in self.log[next_index:]
+                    for entry in self.log#[next_index:]
                 ]
                 args = raft_pb2.AppendEntriesArgs(
                     term=self.current_term,
@@ -402,24 +426,41 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     )
                     self.dump_file.flush()
                     self.other_nodes_status[node_id] = False
-        # repeated_indexes=[]
-        # for i in range(0,len(self.log)-1):
+
+        
+        
+        # for i, entry in enumerate(self.log):
+        #     if entry.startswith('SET'):
+        #         parts = entry.split()
+        #         set_key = ' '.join(parts[1:])
+        #         if set_key in set_occurrences and i - set_occurrences[set_key] <= 3:
+        #             continue
+        #         set_occurrences[set_key] = i
+        #     new_list.append(entry)
+
+        
+
 
         #     if (self.log[i+1] == self.log[i]
         #         and self.log[i+1][0] == "SET"
         #         and self.log[i][0] == "SET"):
         #         repeated_indexes.append(i+1)
-        # # concatenate subarrays from log without repeated indexes
         # new_log = [self.log[i] for i in range(len(self.log)) if i not in repeated_indexes]
         # self.log = new_log
-        if (self.log[-1] == self.log[-2]
-            and self.log[-1][0] == "SET"
-            and self.log[-2][0] == "SET"):
-            self.log.pop()
+
+        # self.log.append((entry.operation, entry.key, entry.value, entry.term))
+        # self.persist_log(entry)
+
+        # if (self.log[-1] == self.log[-2]
+        #     and self.log[-1][0] == "SET"
+        #     and self.log[-2][0] == "SET"):
+        #     self.log.pop()
 
 
             # self.persist_log(entry)
-        self.check_commit_length(entry)
+
+        # self.check_commit_length(entry)
+        
         # self.commit_entry(entry)
 
     # def check_commit_length(self):
