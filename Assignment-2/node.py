@@ -460,7 +460,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
             # self.persist_log(entry)
 
         # self.check_commit_length(entry)
-        
+
         # self.commit_entry(entry)
 
     # def check_commit_length(self):
@@ -575,10 +575,6 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                 self.log.append(("SET", key, value, self.current_term))
                 # self.persist_log(entry)
 
-                # response_event = threading.Event()
-                # response_thread = threading.Thread(target=self.send_set_response, args=(context, str(self.node_id), response_event))
-                # response_thread.start()
-
                 self.send_append_entries(entry)
                 print("sending from leader to client that received set request")
                 return raft_pb2.ServeClientReply(
@@ -593,15 +589,6 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                 return raft_pb2.ServeClientReply(
                     data="b", leaderID=str(self.leader_id), success=False
                 )
-            
-    def send_set_response(self, context, leader_id, response_event):
-        try:
-            print("sending from leader to client that received set request")
-            response = raft_pb2.ServeClientReply(data="empty", leaderID=leader_id, success=True)
-            return response
-            
-        finally:
-            response_event.set()
 
     def get_value(self, key):
         # for entry in reversed(self.log):

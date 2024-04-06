@@ -70,6 +70,15 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         )
         self.log_file.flush()
 
+    def persist_log_file(self, log):
+        self.log_file.seek(0)
+        self.log_file.truncate()
+        for entry in log:
+            self.log_file.write(
+                f"{entry[0]} {entry[1]} {entry[2]} {entry[3]}\n"
+            )
+        self.log_file.flush()
+
     def persist_metadata(self):
         self.metadata_file.write(
             f"{self.current_term} {self.voted_for} {self.commit_length}\n"
@@ -218,31 +227,21 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         )
         self.log.append(("NO-OP", "", "", self.current_term))
         self.persist_log(entry)
-        args = raft_pb2.AppendEntriesArgs(
-            term=self.current_term,
-            leaderID=str(self.node_id),
-            prevLogIndex=len(self.log) - 1,
-            prevLogTerm=self.log[-1][3] if self.log else 0,
-            entries=[entry],
-            leaderCommit=self.commit_length,
-            leaseDuration=self.lease_timeout,
-        )
 
         active_nodes = 0
 
         for node_id in range(self.num_nodes):
             if node_id != self.node_id:
+                entries = [
+                    raft_pb2.Entry(
+                        operation=entry[0],
+                        key=entry[1],
+                        value=entry[2],
+                        term=entry[3],
+                    )
+                    for entry in self.log
+                    ]
                 if not self.other_nodes_status[node_id] :
-                    entries = [
-                        raft_pb2.Entry(
-                            operation=entry[0],
-                            key=entry[1],
-                            value=entry[2],
-                            term=entry[3],
-                        )
-                        for entry in self.log
-                        ]
-
                     args = raft_pb2.AppendEntriesArgs(
                         term=self.current_term,
                         leaderID=str(self.node_id),
@@ -258,7 +257,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     leaderID=str(self.node_id),
                     prevLogIndex=len(self.log) - 1,
                     prevLogTerm=self.log[-1][3] if self.log else 0,
-                    entries=[entry],
+                    entries=entries,
                     leaderCommit=self.commit_length,
                     leaseDuration=self.lease_timeout,
                     )
@@ -304,7 +303,20 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
     def send_append_entries(self, entry):
 
         self.log.append((entry.operation, entry.key, entry.value, entry.term))
-        self.persist_log(entry)
+
+        new_list = []
+        set_occurrences = {}
+
+        for i in range(len(self.log)):
+            if self.log[i][0] == "SET":
+                key = self.log[i][1]
+                if key in set_occurrences and i - set_occurrences[key] <= 3:
+                    continue
+                set_occurrences[key] = i
+            new_list.append(self.log[i])
+
+        self.log = new_list
+        self.persist_log_file(self.log)
 
         for node_id in range(self.num_nodes):
             if node_id != self.node_id:
@@ -321,7 +333,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     raft_pb2.Entry(
                         operation=entry[0], key=entry[1], value=entry[2], term=entry[3]
                     )
-                    for entry in self.log[next_index:]
+                    for entry in self.log
                 ]
                 args = raft_pb2.AppendEntriesArgs(
                     term=self.current_term,
@@ -358,13 +370,6 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     )
                     self.dump_file.flush()
                     self.other_nodes_status[node_id] = False
-
-        if (self.log[-1] == self.log[-2]
-            and self.log[-1][0] == "SET"
-            and self.log[-2][0] == "SET"):
-            self.log.pop()
-
-        self.check_commit_length(entry)
 
     def check_commit_length(self, entry):
 
@@ -457,14 +462,6 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                 return raft_pb2.ServeClientReply(
                     data="b", leaderID=str(self.leader_id), success=False
                 )
-            
-    def send_set_response(self, context, leader_id, response_event):
-        try:
-            response = raft_pb2.ServeClientReply(data="empty", leaderID=leader_id, success=True)
-            return response
-            
-        finally:
-            response_event.set()
 
     def get_value(self, key):
 
@@ -598,7 +595,6 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         self.restart_election_timer()
 
     def renew_lease(self):
-
         if self.state == "LEADER" and self.lease_acquired:
             self.persist_metadata()
             self.send_heartbeat()
