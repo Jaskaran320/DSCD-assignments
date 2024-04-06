@@ -115,10 +115,12 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         self.current_term += 1
         self.voted_for = self.node_id
         self.votes = 1
+
         self.persist_metadata()
         self.send_request_vote()
 
     def send_request_vote(self):
+
         request = raft_pb2.RequestVoteArgs(
             term=self.current_term,
             candidateID=str(self.node_id),
@@ -130,11 +132,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                 try:
                     stub = self.get_stub(node_id)
                     response = stub.RequestVote(request)
-                    if (
-                        response.voteGranted
-                        and self.state == "CANDIDATE"
-                        and self.current_term == response.term
-                    ):
+                    if (response.voteGranted and self.state == "CANDIDATE" and self.current_term == response.term):     
                         self.votes += 1
                         print(
                             f"Vote granted to Node {self.node_id} in term {self.current_term} by Node {node_id}."
@@ -143,23 +141,20 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                             f"Vote granted to Node {self.node_id} in term {self.current_term} by Node {node_id}.\n"
                         )
                         self.dump_file.flush()
-                        self.other_nodes_status[node_id] = True
-
-                    else:
-                        self.dump_file.write(
-                            f"Vote denied to Node {self.node_id} in term {self.current_term} by Node {node_id}.\n"
-                        )
-                        self.dump_file.flush()
+                        self.other_nodes_status[node_id] = True                                       
+                        if self.votes > self.num_nodes // 2:
+                            self.become_leader()
+                            break
+                    elif response.term > self.current_term:
                         self.state = "FOLLOWER"
                         self.current_term = response.term
                         self.voted_for = None
-                        # self.election_timer.cancel()
-                        # self.restart_election_timer()
                         self.old_leader_lease_end_time = max(
                             self.old_leader_lease_end_time,
                             response.oldLeaderLeaseDuration,
                         )
                         self.other_nodes_status[node_id] = True
+                        self.restart_election_timer()
 
                 except grpc.RpcError:
                     self.dump_file.write(
@@ -168,14 +163,64 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     self.dump_file.flush()
                     self.other_nodes_status[node_id] = False
 
-        if self.votes > self.num_nodes // 2:
-            self.become_leader()
+        # request = raft_pb2.RequestVoteArgs(
+        #     term=self.current_term,
+        #     candidateID=str(self.node_id),
+        #     lastLogIndex=len(self.log),
+        #     lastLogTerm=self.log[-1][3] if self.log else 0,
+        # )
+        # for node_id in range(self.num_nodes):
+        #     if node_id != self.node_id:
+        #         try:
+        #             stub = self.get_stub(node_id)
+        #             response = stub.RequestVote(request)
+        #             if (
+        #                 response.voteGranted
+        #                 and self.state == "CANDIDATE"
+        #                 and self.current_term == response.term
+        #             ):
+        #                 self.votes += 1
+        #                 print(
+        #                     f"Vote granted to Node {self.node_id} in term {self.current_term} by Node {node_id}."
+        #                 )
+        #                 self.dump_file.write(
+        #                     f"Vote granted to Node {self.node_id} in term {self.current_term} by Node {node_id}.\n"
+        #                 )
+        #                 self.dump_file.flush()
+        #                 self.other_nodes_status[node_id] = True
 
-        else:
-            self.state = "FOLLOWER"
-            self.voted_for = None
-            self.votes = 0
-            self.restart_election_timer()
+        #             else:
+        #                 self.dump_file.write(
+        #                     f"Vote denied to Node {self.node_id} in term {self.current_term} by Node {node_id}.\n"
+        #                 )
+        #                 self.dump_file.flush()
+        #                 # self.state = "FOLLOWER"
+        #                 # self.current_term = response.term
+        #                 # self.voted_for = None
+        #                 # # self.election_timer.cancel()
+        #                 # # self.restart_election_timer()
+        #                 # self.old_leader_lease_end_time = max(
+        #                 #     self.old_leader_lease_end_time,
+        #                 #     response.oldLeaderLeaseDuration,
+        #                 # )
+        #                 # self.other_nodes_status[node_id] = True
+
+        #         except grpc.RpcError:
+        #             self.dump_file.write(
+        #                 f"send_request_vote Error occurred while sending RPC to Node {node_id}.\n"
+        #             )
+        #             self.dump_file.flush()
+        #             self.other_nodes_status[node_id] = False
+
+        # if self.votes > self.num_nodes // 2:
+        #     self.become_leader()
+
+        # else:
+        #     self.current_term = response.term
+        #     self.state = "FOLLOWER"
+        #     self.voted_for = None
+        #     self.votes = 0
+        #     self.restart_election_timer()
 
     def become_leader(self):
         self.dump_file.write(
@@ -186,7 +231,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         self.leader_id = self.node_id
         # self.election_timer.cancel()
         # self.restart_election_timer()
-        self.next_index = defaultdict(lambda: len(self.log) + 1)
+        self.next_index = defaultdict(lambda: len(self.log))
         self.match_index = defaultdict(lambda: 0)
         self.acquire_lease()
         self.send_heartbeat()
@@ -200,7 +245,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         self.dump_file.write(f"New Leader waiting for Old Leader Lease to timeout.\n")
         self.dump_file.flush()
         while time.time() < self.old_leader_lease_end_time:
-            time.sleep(0.1)
+            time.sleep(0.05)
 
         # self.start_lease_renewal_thread()
 
@@ -242,6 +287,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         )
         self.log.append(("NO-OP", "", "", self.current_term))
         self.persist_log(entry)
+        self.next_index[self.node_id] = len(self.log)
         args = raft_pb2.AppendEntriesArgs(
             term=self.current_term,
             leaderID=str(self.node_id),
@@ -281,7 +327,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     args = raft_pb2.AppendEntriesArgs(
                     term=self.current_term,
                     leaderID=str(self.node_id),
-                    prevLogIndex=len(self.log) - 1,
+                    prevLogIndex=len(self.log)-1,
                     prevLogTerm=self.log[-1][3] if self.log else 0,
                     entries=[entry],
                     leaderCommit=self.commit_length,
@@ -576,18 +622,29 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         return ""
 
     def AppendEntries(self, request, context):
-        self.restart_election_timer()
-        if (self.state == "FOLLOWER" or self.state == "CANDIDATE") and self.current_term <= request.term:
+        if (self.state == "FOLLOWER" or self.state == "CANDIDATE") and request.term > self.current_term:
             self.current_term = request.term
             self.voted_for = None
             self.leader_id = request.leaderID
             self.persist_metadata()
+            self.restart_election_timer()
 
             self.old_leader_lease_end_time = time.time() + request.leaseDuration
 
             prev_log_index = request.prevLogIndex
             prev_log_term = request.prevLogTerm
             entries = request.entries
+
+        if request.term == self.current_term and (self.state == "FOLLOWER" or self.state == "CANDIDATE"):
+            self.state = "FOLLOWER"
+            self.leader_id = request.leaderID
+            prev_log_index = request.prevLogIndex
+            prev_log_term = request.prevLogTerm
+            entries = request.entries
+
+
+        logOk = len(self.log) >= prev_log_index and (prev_log_index == 0 or self.log[prev_log_index][3] == prev_log_term)
+        if self.current_term == request.term and logOk:
 
             if len(entries) > 2:
                 self.log_file.seek(0)
@@ -677,60 +734,95 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
 
         # print(f"Candidate ID: {candidate_id}, Candidate term: {candidate_term}")
         # print(f"Candidate last log index: {candidate_last_log_index}, Candidate last log term: {candidate_last_log_term}")
-
-        if candidate_term <= self.current_term:
-            self.dump_file.write(
-                f"Vote denied for Node {candidate_id} in term {candidate_term} by Node {self.node_id} 1.\n"
-            )
-            self.dump_file.flush()
-            return raft_pb2.RequestVoteReply(
-                term=self.current_term,
-                voteGranted=False,
-                oldLeaderLeaseDuration=self.old_leader_lease_end_time - time.time(),
-            )
-        else:
+        if candidate_term > self.current_term:
             self.current_term = candidate_term
             self.voted_for = None
             self.persist_metadata()
-
+            self.state = "FOLLOWER"
+        
         if self.state == "FOLLOWER":
             self.restart_election_timer()
 
-        # if self.current_term <= candidate_term:
-        # if self.log:
-        #     last_log_term = self.log[-1][3]
-        # else:
-        #     last_log_term = 0
         last_log_term = self.log[-1][3] if self.log else 0
 
-        log_ok = (candidate_last_log_term > last_log_term) or (
-            candidate_last_log_term == last_log_term
-            and candidate_last_log_index >= len(self.log)
-        )
+        log_ok = (candidate_last_log_term > last_log_term) or (candidate_last_log_term == last_log_term and candidate_last_log_index >= len(self.log))
 
-        if (self.voted_for is None or self.voted_for == candidate_id) and log_ok:
-            self.current_term = candidate_term
+        if (self.voted_for is None or self.voted_for == candidate_id) and log_ok and candidate_term==self.current_term:
+            # self.current_term = candidate_term
             self.voted_for = candidate_id
-            self.persist_metadata()
             self.dump_file.write(
                 f"Vote granted for Node {candidate_id} in term {candidate_term} by Node {self.node_id}.\n"
             )
             self.dump_file.flush()
-            return raft_pb2.RequestVoteReply(
-                term=self.current_term,
-                voteGranted=True,
-                oldLeaderLeaseDuration=self.old_leader_lease_end_time - time.time(),
-            )
+            # self.persist_metadata()
+            return raft_pb2.RequestVoteReply(term=self.current_term, voteGranted=True, oldLeaderLeaseDuration=self.old_leader_lease_end_time - time.time())
+        else:
+            self.dump_file.write(f"Vote denied for Node {candidate_id} in term {candidate_term} by Node {self.node_id}.\n"        )
+            self.dump_file.flush()
+            return raft_pb2.RequestVoteReply(term=self.current_term, voteGranted=False, oldLeaderLeaseDuration=self.old_leader_lease_end_time - time.time())
 
-        self.dump_file.write(
-            f"Vote denied for Node {candidate_id} in term {candidate_term} by Node {self.node_id}.\n"
-        )
-        self.dump_file.flush()
-        return raft_pb2.RequestVoteReply(
-            term=self.current_term,
-            voteGranted=False,
-            oldLeaderLeaseDuration=self.old_leader_lease_end_time - time.time(),
-        )
+
+
+
+
+
+
+
+
+
+        # if candidate_term > self.current_term :
+        #     self.dump_file.write(
+        #         f"Vote denied for Node {candidate_id} in term {candidate_term} by Node {self.node_id} 1.\n"
+        #     )
+        #     self.dump_file.flush()
+        #     return raft_pb2.RequestVoteReply(
+        #         term=self.current_term,
+        #         voteGranted=False,
+        #         oldLeaderLeaseDuration=self.old_leader_lease_end_time - time.time(),
+        #     )
+        # else:
+        #     self.current_term = candidate_term
+        #     self.voted_for = None
+        #     self.persist_metadata()
+
+        # if self.state == "FOLLOWER":
+        #     self.restart_election_timer()
+
+        # # if self.current_term <= candidate_term:
+        # # if self.log:
+        # #     last_log_term = self.log[-1][3]
+        # # else:
+        # #     last_log_term = 0
+        # last_log_term = self.log[-1][3] if self.log else 0
+
+        # log_ok = (candidate_last_log_term > last_log_term) or (
+        #     candidate_last_log_term == last_log_term
+        #     and candidate_last_log_index >= len(self.log)
+        # )
+
+        # if (self.voted_for is None or self.voted_for == candidate_id) and log_ok:
+        #     self.current_term = candidate_term
+        #     self.voted_for = candidate_id
+        #     self.persist_metadata()
+        #     self.dump_file.write(
+        #         f"Vote granted for Node {candidate_id} in term {candidate_term} by Node {self.node_id}.\n"
+        #     )
+        #     self.dump_file.flush()
+        #     return raft_pb2.RequestVoteReply(
+        #         term=self.current_term,
+        #         voteGranted=True,
+        #         oldLeaderLeaseDuration=self.old_leader_lease_end_time - time.time(),
+        #     )
+
+        # self.dump_file.write(
+        #     f"Vote denied for Node {candidate_id} in term {candidate_term} by Node {self.node_id}.\n"
+        # )
+        # self.dump_file.flush()
+        # return raft_pb2.RequestVoteReply(
+        #     term=self.current_term,
+        #     voteGranted=False,
+        #     oldLeaderLeaseDuration=self.old_leader_lease_end_time - time.time(),
+        # )
 
     def step_down(self):
         self.dump_file.write(f"Node {self.node_id} Stepping down\n")
