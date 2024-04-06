@@ -256,7 +256,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
 
         for node_id in range(self.num_nodes):
             if node_id != self.node_id:
-                print("Status of ",node_id,"is",not self.other_nodes_status[node_id])
+                # print("Status of ",node_id,"is",not self.other_nodes_status[node_id])
                 if not self.other_nodes_status[node_id] :
                     entries = [
                         raft_pb2.Entry(
@@ -289,7 +289,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     )
 
                 try:
-                    print("Checking if this works at all",len(args.entries))
+                    # print("Checking if this works at all",len(args.entries))
                     stub = self.get_stub(node_id)
                     response = stub.AppendEntries(args)
                     print("Sending from send_heartbeat, node", self.node_id)
@@ -298,7 +298,9 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                         self.match_index[node_id] = args.prevLogIndex + len(
                             args.entries
                         )
-                        self.next_index[node_id] = self.match_index[node_id] + 1
+                        # self.next_index[node_id] = self.match_index[node_id] + 1
+                        self.next_index[node_id] = len(self.log) + 1
+
                         self.other_nodes_status[node_id] = True
 
                     else:
